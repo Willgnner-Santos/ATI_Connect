@@ -1,0 +1,6 @@
+# Ferramentas exclusivas de desenvolvimento/teste.
+# Instale separadamente DEPOIS do lock de runtime:
+# python -m pip install --require-hashes -r requirements.lock
+# python -m pip install -r requirements-dev.txt
+pytest==8.0.2
+pytest-timeout==2.2.0

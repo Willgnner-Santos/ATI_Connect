@@ -1,0 +1,2369 @@
+openapi: 3.0.3
+info:
+  title: Plataforma ATI - SaaS API
+  version: 2.0.0
+  description: |
+    API RESTful multi-tenant para gerenciamento de equipamentos IoT.
+
+    ## Arquitetura
+
+    Sistema hierárquico: **PLATFORM** → **Organization** → **Tenant** → **Users/Equipment**
+
+    ## Autenticação
+
+    1. Fazer login em `/saas/auth/login`
+    2. Usar o `access_token` no header `Authorization: Bearer {token}`
+    3. Tokens expiram em 1 hora, use `/saas/auth/refresh` para renovar
+
+    ## Permissões
+
+    Sistema de roles dinâmico por organização:
+    - **superadmin**: Acesso total ao sistema
+    - **collaborator**: Administra todas as organizações, sem privilégios reservados de plataforma
+    - **admin**: Administrador da organização
+    - **manager**: Gerente de tenant
+    - **viewer**: Visualizador (apenas leitura)
+
+  contact:
+    name: CloudFaster Tecnologia
+    email: suporte@cloudfaster.com.br
+    url: https://cloudfaster.com.br
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://2wdbgmcijd.execute-api.sa-east-1.amazonaws.com/sandbox
+    description: Sandbox
+  - url: https://api.plataforma-ati.com/production
+    description: Production (TBD)
+
+tags:
+  - name: Authentication
+    description: Autenticação e gerenciamento de senha
+  - name: Catalog
+    description: Gerenciamento do catálogo global de sensores
+  - name: Organizations
+    description: Gerenciamento de organizações (distribuidoras)
+  - name: Tenants
+    description: Gerenciamento de tenants (clientes finais)
+  - name: Users
+    description: Gerenciamento de usuários
+  - name: Equipment
+    description: Gerenciamento de equipamentos IoT
+  - name: Dashboard
+    description: Dashboard com telemetria de equipamentos
+  - name: Virtual Technician
+    description: Automações e ações programadas
+  - name: Report
+    description: Relatórios de telemetria
+
+security:
+  - BearerAuth: []
+
+paths:
+  /saas/auth/login:
+    post:
+      tags: [Authentication]
+      summary: Login
+      description: Autentica usuário e retorna tokens JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: admin@plataforma-ati.com
+                password:
+                  type: string
+                  format: password
+                  example: senha-configurada-no-ambiente
+      responses:
+        '200':
+          description: Login bem-sucedido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: Login realizado com sucesso
+                  data:
+                    type: object
+                    properties:
+                      authorization:
+                        type: object
+                        properties:
+                          access_token:
+                            type: string
+                            description: Token de acesso (válido por 1 hora)
+                          refresh_token:
+                            type: string
+                            description: Token de refresh (válido por 30 dias). Armazene para renovar o access_token via /saas/auth/refresh.
+                          id_token:
+                            type: string
+                            description: Token de identidade JWT com dados do usuário.
+                          iot:
+                                type: object
+                                description: Credenciais para conexão MQTT do equipamento. A chave privada deve ser armazenada com segurança.
+                                properties:
+                                  endpoint:
+                                    type: string
+                                  certificatePem:
+                                    type: string
+                                    description: Certificado X.509 do equipamento em formato PEM.
+                                  privateKey:
+                                    type: string
+                                    description: Chave privada do equipamento em formato PEM.
+                                  amazonRootCA1:
+                                    type: string
+                                    description: Certificado raiz público Amazon Root CA 1 em formato PEM.
+                          expires_in:
+                            type: integer
+                            example: 3600
+                          token_type:
+                            type: string
+                            example: Bearer
+                      user:
+                        $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /saas/auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Renovar token
+      description: Renova o access_token usando refresh_token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken, username]
+              properties:
+                refreshToken:
+                  type: string
+                  description: Refresh token obtido no login
+                username:
+                  type: string
+                  description: Username (sub) do usuário
+                  example: f36c7a9a-70b1-7032-34cf-3f76c353ee47
+      responses:
+        '200':
+          description: Token renovado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      access_token:
+                        type: string
+                      id_token:
+                        type: string
+                      token_type:
+                        type: string
+                      expires_in:
+                        type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /saas/auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Logout
+      description: Invalida o token atual (global sign-out)
+      responses:
+        '200':
+          description: Logout realizado
+
+  /saas/auth/forgot-password:
+    post:
+      tags: [Authentication]
+      summary: Solicitar recuperação de senha
+      description: |
+        Envia um código de recuperação para o e-mail informado.
+        Por segurança, sempre retorna 200 com a mesma mensagem genérica,
+        independente de o e-mail existir ou não no Cognito.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: admin@plataforma-ati.com
+      responses:
+        '200':
+          description: Solicitação processada (mensagem genérica)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: Se o e-mail estiver cadastrado, você receberá um código de recuperação
+
+  /saas/auth/reset-password:
+    post:
+      tags: [Authentication]
+      summary: Confirmar nova senha
+      description: Confirma o código de recuperação e define a nova senha
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code, newPassword]
+              properties:
+                email:
+                  type: string
+                  format: email
+                code:
+                  type: string
+                  description: Código de verificação recebido por e-mail
+                newPassword:
+                  type: string
+                  format: password
+                  description: Nova senha (mínimo 8 caracteres)
+      responses:
+        '200':
+          description: Senha alterada com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: Senha alterada com sucesso
+        '400':
+          description: Código inválido/expirado ou senha inválida
+
+  /saas/organization:
+    get:
+      tags: [Organizations]
+      summary: Listar organizações
+      description: |
+        Lista organizações disponíveis.
+        - **Superadmin/Collaborator**: Veem todas as organizações de negócio
+        - **Admin**: Vê apenas a própria organização
+      parameters:
+        - name: id
+          in: query
+          schema:
+            type: string
+          description: ID específico da organização (opcional)
+        - name: status
+          in: query
+          schema:
+            type: string
+          description: Filtrar por status (ex. 'active', 'inactive' ou 'all')
+      responses:
+        '200':
+          description: Lista de organizações
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    oneOf:
+                      - $ref: '#/components/schemas/Organization'
+                      - type: array
+                        items:
+                          $ref: '#/components/schemas/Organization'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      tags: [Organizations]
+      summary: Criar organização
+      description: |
+        Cria nova organização (roles globais superadmin ou collaborator).
+        O `name` e o `cnpj` devem ser únicos entre organizações ativas.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, cnpj]
+              properties:
+                name:
+                  type: string
+                  description: Nome da organização (único entre organizações ativas)
+                  example: Distribuidora ABC Ltda
+                email:
+                  type: string
+                  format: email
+                  example: contato@distribuidora-abc.com
+                cnpj:
+                  type: string
+                  description: |
+                    CNPJ da organização — obrigatório e único. Aceita formato com máscara
+                    (`XX.XXX.XXX/XXXX-XX`) ou somente os 14 caracteres alfanuméricos.
+                    Suporta o novo formato alfanumérico (vigência 2026).
+                  example: AB.123.456/0001-78
+                type:
+                  type: string
+                  enum: [ati, distributor]
+                  default: distributor
+                admin:
+                  type: object
+                  description: Criar usuário admin automático (opcional)
+                  properties:
+                    name:
+                      type: string
+                      example: João Silva
+                    email:
+                      type: string
+                      format: email
+                      example: joao@distribuidora-abc.com
+                    password:
+                      type: string
+                      format: password
+                      example: Admin@2026
+                    role:
+                      type: string
+                      default: admin
+      responses:
+        '201':
+          description: Organização criada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 201
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      organizationId:
+                        type: string
+                      userId:
+                        type: string
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /saas/organization/{id}:
+    delete:
+      tags: [Organizations]
+      summary: Soft delete organização
+      description: Realiza a exclusão lógica da organização (roles globais ou o próprio admin da organização).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID da organização a ser excluída
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Organização excluída com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: Organização deletada com sucesso
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Organização não encontrada
+
+  /saas/organization/{id}/reactivate:
+    post:
+      tags: [Organizations]
+      summary: Reativar organização
+      description: Realiza a reativação da organização e de todos os seus usuários associados no Cognito (roles globais).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: ID da organização a ser reativada
+      responses:
+        '200':
+          description: Organização reativada com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: Organização reativada com sucesso
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Organização não encontrada
+
+  /saas/tenant:
+    get:
+      tags: [Tenants]
+      summary: Listar tenants
+      description: Lista tenants da organização
+      parameters:
+        - name: organizationId
+          in: query
+          schema:
+            type: string
+          description: ID da organização
+        - name: tenantId
+          in: query
+          schema:
+            type: string
+          description: ID específico do tenant (opcional)
+        - name: status
+          in: query
+          schema:
+            type: string
+          description: Filtrar por status (ex. 'active', 'inactive' ou 'all')
+      responses:
+        '200':
+          description: Lista de tenants
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Tenant'
+
+    post:
+      tags: [Tenants]
+      summary: Criar tenant
+      description: |
+        Cria novo tenant (cliente) dentro da organização.
+        O `name`, `cnpj` e `cpf` devem ser únicos dentro da organização.
+        Obrigatório informar `cnpj` (pessoa jurídica) **ou** `cpf` (pessoa física) — não ambos.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [organizationId, name]
+              properties:
+                organizationId:
+                  type: string
+                  description: ID da organização
+                name:
+                  type: string
+                  description: Nome do tenant (único dentro da organização)
+                  example: Cliente ABC Ltda
+                cnpj:
+                  type: string
+                  description: |
+                    CNPJ do tenant (pessoa jurídica). Obrigatório se `cpf` não for informado.
+                    Aceita formato com máscara (`XX.XXX.XXX/XXXX-XX`) ou 14 caracteres alfanuméricos.
+                    Suporta o novo formato alfanumérico (vigência 2026).
+                  example: AB.123.456/0001-78
+                cpf:
+                  type: string
+                  description: |
+                    CPF do tenant (pessoa física). Obrigatório se `cnpj` não for informado.
+                    Aceita formato com máscara (`XXX.XXX.XXX-XX`) ou 11 dígitos.
+                  example: 123.456.789-09
+                user:
+                  type: object
+                  description: Criar usuário admin automático (opcional)
+                  properties:
+                    name:
+                      type: string
+                      example: João Silva
+                    email:
+                      type: string
+                      format: email
+                      example: joao@cliente-abc.com
+                    password:
+                      type: string
+                      format: password
+                      example: Senha@2026
+                    role:
+                      type: string
+                      default: admin
+      responses:
+        '201':
+          description: Tenant criado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 201
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      tenantId:
+                        type: string
+                      userId:
+                        type: string
+
+  /saas/tenant/{id}:
+    delete:
+      tags: [Tenants]
+      summary: Soft delete tenant
+      description: Realiza a exclusão lógica do tenant (roles globais ou admin/gerente da própria organização).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: ID da tenant a ser excluída
+      responses:
+        '200':
+          description: Tenant excluído com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: Tenant deletado com sucesso
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Tenant não encontrado
+
+  /saas/tenant/{id}/reactivate:
+    post:
+      tags: [Tenants]
+      summary: Reativar tenant
+      description: Realiza a reativação do tenant e de todos os seus usuários associados no Cognito (roles globais ou admin da própria organização).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: ID do tenant a ser reativado
+      responses:
+        '200':
+          description: Tenant reativado com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: Tenant reativado com sucesso
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Tenant não encontrado
+
+  /saas/user:
+    get:
+      tags: [Users]
+      summary: Listar usuários
+      description: Lista usuários da organização/tenant
+      parameters:
+        - name: organizationId
+          in: query
+          schema:
+            type: string
+        - name: tenantId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Lista de usuários
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+
+    post:
+      tags: [Users]
+      summary: Criar usuário
+      description: |
+        Cria novo usuário e registra no Cognito + DynamoDB.
+
+        **Permissões:**
+        - Superadmin/Collaborator: podem criar em qualquer organização de negócio/tenant
+        - Admin: só pode criar na própria organização
+        - Manager: só pode criar no próprio tenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, organizationId, role]
+              properties:
+                name:
+                  type: string
+                  description: Nome completo
+                  example: João Silva
+                email:
+                  type: string
+                  format: email
+                  description: Email (username no Cognito, deve ser único)
+                  example: joao.silva@cliente-abc.com
+                organizationId:
+                  type: string
+                  description: ID da organização
+                tenantId:
+                  type: string
+                  description: ID do tenant (opcional, se omitido fica no nível org)
+                role:
+                  type: string
+                  description: Role do usuário
+                  enum: [superadmin, collaborator, admin, manager, viewer]
+                  example: admin
+                tenantRole:
+                  type: string
+                  description: Role operacional global do usuário no tenant.
+                  enum: [client, technician]
+                  example: technician
+                password:
+                  type: string
+                  format: password
+                  description: Senha inicial (se omitido, Cognito envia email)
+                  example: Senha@2026
+      responses:
+        '201':
+          description: Usuário criado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 201
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      userId:
+                        type: string
+                      organizationId:
+                        type: string
+                      tenantId:
+                        type: string
+
+  /saas/user/{id}:
+    put:
+      tags: [Users]
+      summary: Atualizar usuário
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                  description: Email (atualização do Cognito, deve ser único)
+                role:
+                  type: string
+                tenantRole:
+                  type: string
+                  enum: [gestor, tecnico, user, manager, technician, client]
+                status:
+                  type: string
+                  enum: [active, inactive]
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Usuário atualizado
+
+    delete:
+      tags: [Users]
+      summary: Deletar usuário
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Usuário deletado
+
+  /saas/user/{id}/reactivate:
+    post:
+      tags: [Users]
+      summary: Reativar usuário
+      description: Realiza a reativação do usuário no Cognito e no DynamoDB (roles globais, admin da própria org ou manager do mesmo tenant).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: ID do usuário a ser reativado
+      responses:
+        '200':
+          description: Usuário reativado com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: Usuário reativado com sucesso
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Usuário não encontrado
+
+  /saas/equipment:
+    get:
+      tags: [Equipment]
+      summary: Listar equipamentos
+      parameters:
+        - name: tenantId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Lista de equipamentos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Equipment'
+
+    post:
+      tags: [Equipment]
+      summary: Criar equipamento
+      description: |
+        Cria novo equipamento IoT com certificados e Thing no AWS IoT Core.
+
+        **O que acontece:**
+        1. Valida `modelId` no catálogo da organização (se informado)
+        2. Cria IoT Thing no AWS IoT Core
+        3. Gera certificado X.509 para autenticação
+        4. Vincula certificado à Thing
+        5. Aplica política IoT padrão
+        6. Salva equipamento no DynamoDB (com `modelId` quando fornecido)
+        7. Retorna credenciais IoT
+        8. Copia a árvore de falhas do modelo para o equipamento (best-effort, não bloqueia)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [organizationId, tenantId, name, equipmentType, model, local, sensors]
+              properties:
+                organizationId:
+                  type: string
+                tenantId:
+                  type: string
+                name:
+                  type: string
+                  description: Nome/identificação do equipamento
+                  example: Elevador Social - Bloco A
+                equipmentType:
+                  type: string
+                  description: Tipo do equipamento
+                  enum: [elevator, pump, generator, ac, hvac, security, custom]
+                  example: elevator
+                model:
+                  type: string
+                  description: Modelo do equipamento (texto livre, usado para gerar o nome da IoT Thing)
+                  example: Atlas HydroX 2000
+                modelId:
+                  type: string
+                  description: |
+                    ID do modelo de equipamento no catálogo da organização (opcional).
+                    Quando informado, vincula o equipamento ao modelo e dispara a cópia da
+                    árvore de falhas do modelo para o equipamento no serviço arvore-de-falhas.
+                    Formato: letras minúsculas, dígitos e underscores (`^[a-z0-9_]+$`).
+                  pattern: '^[a-z0-9_]+$'
+                  example: bomba_centrifuga_v2
+                local:
+                  type: string
+                  description: Localização física
+                  example: Edifício Central - Bloco A
+                sensors:
+                  type: object
+                  description: Definição dos sensores/pontos de monitoramento
+                  example:
+                    temperature:
+                      sensorType: "temperature"
+                      unit: "°C"
+                      name: "Temperatura do Motor"
+                    vibration:
+                      sensorType: "analog"
+                      unit: "Hz"
+                      name: "Vibração"
+                    door_status:
+                      sensorType: "digital"
+                      unit: "bool"
+                      name: "Status da Porta"
+                commands:
+                  type: object
+                  description: |
+                    Comandos do equipamento (opcional). Chave = nome da variável enviada ao device.
+                    Cada entrada precisa de `name` (string), `resource` (string) e `dataType` (bool/int/float/string).
+                    Campo opcional `allowedRoles` (lista de strings): se ausente, todos os papéis podem disparar;
+                    se lista vazia, nenhum papel pode disparar.
+                  example:
+                    relay1:
+                      name: "Relay 1"
+                      resource: "relay1"
+                      dataType: "bool"
+                      allowedRoles: ["tecnico"]
+                states:
+                  type: object
+                  description: |
+                    Estados interpretados do equipamento — não é leitura bruta de sensor,
+                    é uma interpretação (ex: "andar", "subindo"). Variável livre igual sensor,
+                    mas sem catálogo global: só exige um dataType primitivo (int/string/bool).
+                    Opcional.
+                  example:
+                    andar:
+                      dataType: int
+                      name: "Andar Atual"
+                    subindo:
+                      dataType: bool
+                      name: "Subindo"
+      responses:
+        '201':
+          description: Equipamento criado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 201
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      equipmentId:
+                        type: string
+                      thingName:
+                        type: string
+                      iot:
+                        type: object
+                        description: Credenciais IoT — retornadas UMA ÚNICA VEZ na criação. Armazene imediatamente.
+                        properties:
+                          endpoint:
+                            type: string
+                            description: Endpoint MQTT do AWS IoT Core
+                          certificatePem:
+                            type: string
+                            description: Certificado X.509 em formato PEM. Salvar como certificate.pem.crt
+                          privateKey:
+                            type: string
+                            description: Chave privada em formato PEM. Salvar como private.pem.key — manter em segredo.
+                          amazonRootCA1:
+                            type: string
+                            description: Certificado raiz Amazon Root CA 1 em formato PEM. Salvar como AmazonRootCA1.pem
+
+  /saas/equipment/{id}:
+    get:
+      tags: [Equipment]
+      summary: Ver detalhes do equipamento
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Detalhes do equipamento
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Equipment'
+
+    put:
+      tags: [Equipment]
+      summary: Atualizar equipamento
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                local:
+                  type: string
+                model:
+                  type: string
+                equipmentType:
+                  type: string
+                  enum: [elevator, pump, generator, ac, hvac, security, custom]
+                status:
+                  type: string
+                  enum: [active, inactive, maintenance]
+                  description: Status do equipamento. Use 'inactive' para desativar.
+                sensors:
+                  type: object
+                  description: Se enviado, não pode ser um objeto vazio (apagaria toda a configuração).
+                states:
+                  type: object
+                  description: |
+                    Estados interpretados (ver POST /saas/equipment). Se enviado, não pode
+                    ser um objeto vazio.
+                  example:
+                    andar:
+                      dataType: int
+                commands:
+                  type: object
+                  description: Comandos do equipamento. Se enviado, não pode ser vazio.
+      responses:
+        '200':
+          description: Equipamento atualizado
+
+    delete:
+      tags: [Equipment]
+      summary: Deletar equipamento
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Equipamento deletado
+
+  /saas/equipment/{id}/action:
+    get:
+      tags: [Equipment]
+      summary: Listar comandos permitidos do equipamento
+      description: Retorna os comandos cadastrados no equipamento que o papel do usuário (role) tem permissão de enviar.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: ID do equipamento
+      responses:
+        '200':
+          description: Lista de comandos do equipamento permitidos para o usuário
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      equipmentId:
+                        type: string
+                      tenantId:
+                        type: string
+                      organizationId:
+                        type: string
+                      name:
+                        type: string
+                      status:
+                        type: string
+                      commands:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            variable:
+                              type: string
+                              description: Nome identificador do comando enviado ao device
+                            name:
+                              type: string
+                              description: Nome legível do comando
+                            resource:
+                              type: string
+                              description: Recurso do comando
+                            dataType:
+                              type: string
+                              enum: [bool, int, float, string]
+                            allowedRoles:
+                              type: array
+                              items:
+                                type: string
+                              description: Roles permitidos. Ausente = todos podem; lista vazia = nenhum pode.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    post:
+      tags: [Equipment]
+      summary: Enviar comando para o equipamento
+      description: Publica um comando no tópico MQTT do equipamento, caso a role do usuário permita.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: ID do equipamento
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [command, value]
+              properties:
+                command:
+                  type: string
+                  description: Nome do command cadastrado no equipamento
+                  example: led
+                value:
+                  type: string
+                  description: Valor do comando a ser enviado (int, string ou bool)
+                  example: true
+      responses:
+        '200':
+          description: Comando enviado com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      equipmentId:
+                        type: string
+                      command:
+                        type: string
+                      value:
+                        type: string
+                      topic:
+                        type: string
+                      sentAt:
+                        type: string
+                        format: date-time
+                      sentBy:
+                        type: string
+        '400':
+          description: Dados de entrada ou valor inválido para o comando
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+
+  /saas/catalog/sensor-type:
+    get:
+      tags: [Catalog]
+      summary: Listar tipos de sensores
+      description: Retorna todos os tipos de sensores cadastrados no catálogo global do sistema.
+      responses:
+        '200':
+          description: Lista de tipos de sensores
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SensorType'
+    post:
+      tags: [Catalog]
+      summary: Criar tipo de sensor
+      description: Cadastra um novo tipo de sensor no catálogo global (apenas superadmin).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SensorType'
+      responses:
+        '201':
+          description: Tipo de sensor criado
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /saas/catalog/sensor-type/{id}:
+    delete:
+      tags: [Catalog]
+      summary: Deletar tipo de sensor
+      description: Remove um tipo de sensor do catálogo global (apenas superadmin).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tipo de sensor deletado
+
+  /saas/catalog/equipment-model:
+    get:
+      tags: [Catalog]
+      summary: Listar modelos de equipamentos
+      description: Retorna todos os modelos de equipamentos cadastrados para a organização do usuário.
+      parameters:
+        - name: organizationId
+          in: query
+          description: Filtrar por organização específica (roles globais)
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Lista de modelos de equipamentos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EquipmentModel'
+    post:
+      tags: [Catalog]
+      summary: Criar modelo de equipamento
+      description: Cadastra um novo modelo de equipamento para a organização. O campo 'name' deve ser único dentro da organização (requer permissão de escrita de equipment). Roles globais indicam a organização alvo no corpo ('organizationId').
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EquipmentModel'
+      responses:
+        '201':
+          description: Modelo de equipamento criado
+        '400':
+          description: Dados inválidos (ex. nome duplicado na organização)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /saas/catalog/equipment-model/{id}:
+    delete:
+      tags: [Catalog]
+      summary: Deletar modelo de equipamento
+      description: Remove um modelo de equipamento do catálogo da organização (requer permissão de escrita de equipment).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: organizationId
+          in: query
+          description: Organização a que pertence o modelo. Obrigatório para roles globais.
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Modelo de equipamento deletado
+
+    put:
+      tags: [Catalog]
+      summary: Atualizar modelo de equipamento
+      description: Atualiza os dados de um modelo de equipamento na organização. Se o nome for alterado, ele deve ser único dentro da organização. (requer permissão de escrita de equipment).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: organizationId
+          in: query
+          description: Organização a que pertence o modelo. Obrigatório para roles globais se não fornecido no corpo da requisição.
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                organizationId:
+                  type: string
+                  example: PLATFORM
+                  description: Organização a que pertence o modelo. Obrigatório para roles globais se não informado via query parameter.
+                name:
+                  type: string
+                  example: Otis Gen2 Modificado
+                equipmentType:
+                  type: string
+                  example: elevator
+                sensors:
+                  type: object
+                  example:
+                    temp_cabine:
+                      sensorType: temperature_celsius
+                      name: Sensor de Cabine Novo
+                      unit: "°C"
+                states:
+                  type: object
+                  description: Estados interpretados (ver POST /saas/equipment). Se omitido, mantém o valor existente.
+                  example:
+                    andar:
+                      dataType: int
+      responses:
+        '200':
+          description: Modelo de equipamento atualizado com sucesso
+        '400':
+          description: Dados inválidos (ex. nome duplicado na organização)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /saas/dashboard:
+    get:
+      tags: [Dashboard]
+      summary: Obter dados do dashboard
+      description: |
+        Retorna lista de equipamentos com telemetria recente e credenciais MQTT para conexão em tempo real.
+
+        **Uso típico:**
+        1. Frontend chama este endpoint ao carregar dashboard
+        2. Recebe lista de equipamentos com valores recentes dos sensores
+        3. Usa as credenciais MQTT retornadas para subscrever aos tópicos em tempo real
+
+        **Dados retornados:**
+        - Lista de equipamentos ativos do tenant
+        - Valores dos sensores nos últimos N minutos
+        - Credenciais AWS STS temporárias para MQTT (válidas por 1 hora)
+        - Endpoints e tópicos IoT de cada equipamento
+      parameters:
+        - name: organizationId
+          in: query
+          description: Filtrar por organização específica (roles globais)
+          required: false
+          schema:
+            type: string
+        - name: tenantId
+          in: query
+          description: Filtrar por tenant específico (roles globais ou Org Admin)
+          required: false
+          schema:
+            type: string
+        - name: equipmentId
+          in: query
+          description: Filtrar por equipamento específico (Necessário para retornar a série histórica de telemetria)
+          required: false
+          schema:
+            type: string
+        - name: lastMinutes
+          in: query
+          description: Quantidade de minutos de histórico de telemetria (padrão 5, máximo 1440)
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1440
+            default: 5
+            example: 15
+      responses:
+        '200':
+          description: Dashboard carregado com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: Dashboard carregado com sucesso
+                  data:
+                    type: object
+                    properties:
+                      equipment:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            equipmentId:
+                              type: string
+                              example: "550e8400-e29b-41d4-a716-446655440000"
+                            name:
+                              type: string
+                              example: "Elevador A - Bloco 1"
+                            type:
+                              type: string
+                              example: "elevator"
+                            model:
+                              type: string
+                              example: "MOD-001"
+                            modelName:
+                              type: string
+                              example: "Elevador Hidráulico 500kg"
+                            status:
+                              type: string
+                              enum: [active, inactive, maintenance]
+                              example: "active"
+                            thingId:
+                              type: string
+                              example: "ati_elevator_550e8400"
+                            endpoint:
+                              type: string
+                              example: "a3qw5xxd0zv4nm-ats.iot.sa-east-1.amazonaws.com"
+                            topic:
+                              type: string
+                              example: "ati/tenant_abc123/elevator_550e8400/telemetry"
+                            region:
+                              type: string
+                              example: "sa-east-1"
+                            lastSeen:
+                              type: string
+                              format: date-time
+                              nullable: true
+                              description: Timestamp da última telemetria recebida (mantido pelo Router a cada mensagem). Null se o equipamento nunca reportou nada.
+                              example: "2026-08-14T17:10:39.247780+00:00"
+                            secondsSinceLastSeen:
+                              type: number
+                              nullable: true
+                              example: 56.4
+                            isStale:
+                              type: boolean
+                              description: true se lastSeen for nulo ou mais antigo que 10 minutos (device provavelmente offline).
+                              example: false
+                            sensors:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  variable:
+                                    type: string
+                                    example: "temperature"
+                                  name:
+                                    type: string
+                                    example: "Temperatura Motor"
+                                  unit:
+                                    type: string
+                                    example: "°C"
+                                  values:
+                                    type: array
+                                    description: |
+                                      Valores históricos do sensor nos últimos N minutos. Se não houver
+                                      leitura no período, cai pro último valor conhecido (marcado com
+                                      stale=true) em vez de vir vazio — só fica vazio se o sensor nunca
+                                      reportou nada.
+                                    items:
+                                      type: object
+                                      properties:
+                                        timestamp:
+                                          type: integer
+                                          description: Unix timestamp em milissegundos
+                                          example: 1716283920000
+                                        datetime:
+                                          type: string
+                                          format: date-time
+                                          example: "2026-05-21 10:45:20"
+                                        value:
+                                          oneOf:
+                                            - type: number
+                                            - type: string
+                                          description: Valor do sensor ou "N/A" se não disponível
+                                          example: 42.5
+                                        stale:
+                                          type: boolean
+                                          description: Presente e true quando o valor não é do período consultado — é o último valor conhecido (fallback via lastValues).
+                                          example: true
+                            states:
+                              type: array
+                              description: Estados interpretados do equipamento (ex "andar", "subindo") — mesmo formato de sensors, sem unit.
+                              items:
+                                type: object
+                                properties:
+                                  variable:
+                                    type: string
+                                    example: "andar"
+                                  name:
+                                    type: string
+                                    example: "Andar Atual"
+                                  dataType:
+                                    type: string
+                                    enum: [int, string, bool]
+                                  values:
+                                    type: array
+                                    description: Mesmo comportamento de fallback/stale que sensors.values.
+                                    items:
+                                      type: object
+                                      properties:
+                                        timestamp:
+                                          type: integer
+                                        datetime:
+                                          type: string
+                                          format: date-time
+                                        value:
+                                          oneOf:
+                                            - type: integer
+                                            - type: string
+                                            - type: boolean
+                                        stale:
+                                          type: boolean
+                                          example: true
+                            commands:
+                              type: array
+                              description: Comandos disponíveis no equipamento para o usuário autenticado.
+                              items:
+                                type: object
+                                properties:
+                                  variable:
+                                    type: string
+                                    example: "relay1"
+                                  name:
+                                    type: string
+                                    example: "Relay 1"
+                                  resource:
+                                    type: string
+                                    example: "relay1"
+                                  dataType:
+                                    type: string
+                                    enum: [bool, int, float, string]
+                                  allowedRoles:
+                                    type: array
+                                    items:
+                                      type: string
+                                    description: Roles permitidos. Ausente = todos; lista vazia = nenhum.
+                            credentials:
+                              type: object
+                              description: Credenciais AWS STS temporárias para MQTT (válidas por 1 hora)
+                              properties:
+                                accessKeyId:
+                                  type: string
+                                  example: "ASIAXXXXXXXXXXX"
+                                secretAccessKey:
+                                  type: string
+                                  example: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                                sessionToken:
+                                  type: string
+                                  example: "FwoGZXIvYXdzEBYaDMK..."
+                                expiration:
+                                  type: string
+                                  format: date-time
+                                  example: "2026-05-21T11:45:20+00:00"
+                      telemetryWindow:
+                        type: object
+                        description: Janela de tempo dos dados de telemetria
+                        properties:
+                          minutes:
+                            type: integer
+                            example: 15
+                          from:
+                            type: string
+                            format: date-time
+                            example: "2026-05-21T10:30:20Z"
+                          to:
+                            type: string
+                            format: date-time
+                            example: "2026-05-21T10:45:20Z"
+                      totalEquipment:
+                        type: integer
+                        example: 5
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /saas/virtual-technician:
+    get:
+      tags: [Virtual Technician]
+      summary: Listar ações do técnico virtual
+      description: Lista todas as ações automáticas configuradas
+      parameters:
+        - name: equipmentId
+          in: query
+          description: Filtrar por equipamento
+          schema:
+            type: string
+        - name: type
+          in: query
+          description: Filtrar por tipo
+          schema:
+            type: string
+            enum: [action, notification, schedule]
+        - name: status
+          in: query
+          description: Filtrar por status
+          schema:
+            type: string
+            enum: [active, inactive]
+      responses:
+        '200':
+          description: Lista de ações
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      actions:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/VirtualTechnicianAction'
+                      total:
+                        type: integer
+
+    post:
+      tags: [Virtual Technician]
+      summary: Criar ação do técnico virtual
+      description: |
+        Cria nova ação automática (action, notification ou schedule).
+
+        **Tipos**:
+        - **action**: Envia comandos MQTT quando condições são atendidas
+        - **notification**: Envia email/SMS quando condições são atendidas
+        - **schedule**: Executa ações em horários programados
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type, equipmentId, status]
+              properties:
+                organizationId:
+                  type: string
+                  description: Obrigatório para roles globais
+                tenantId:
+                  type: string
+                  description: Obrigatório para roles globais e administradores sem tenant fixo
+                name:
+                  type: string
+                  example: "Ligar ventilação se superaquecer"
+                type:
+                  type: string
+                  enum: [action, notification, schedule]
+                equipmentId:
+                  type: string
+                status:
+                  type: string
+                  enum: [active, inactive]
+                conditions:
+                  type: array
+                  description: Para action/notification
+                  items:
+                    type: object
+                    properties:
+                      variable:
+                        type: string
+                      operator:
+                        type: string
+                        enum: ['=', '>', '<', '>=', '<=', '!=']
+                      value:
+                        type: string
+                      type:
+                        type: string
+                        enum: [string, number, boolean]
+                      condition:
+                        type: string
+                        enum: [AND, OR]
+                actions:
+                  type: array
+                  description: Para action/schedule
+                  items:
+                    type: object
+                    properties:
+                      variable:
+                        type: string
+                      value:
+                        type: string
+                      type:
+                        type: string
+                        enum: [string, number, boolean]
+                      delay:
+                        type: string
+                notification:
+                  type: object
+                  description: Para notification
+                  properties:
+                    subject:
+                      type: string
+                    message:
+                      type: string
+                    recipients:
+                      type: array
+                      description: "Lista de destinatários. Suporta E-mail (ex: mail@ex.com), SMS (ex: +551199999999) e Telegram (ex: tg:12345678)."
+                      items:
+                        type: string
+                schedule:
+                  type: object
+                  description: Para schedule
+                  properties:
+                    type:
+                      type: string
+                      enum: [cron, interval]
+                    interval:
+                      type: string
+                      enum: [daily, weekly, monthly]
+                    time:
+                      type: string
+                    weekDay:
+                      type: array
+                      items:
+                        type: integer
+                    monthDay:
+                      type: array
+                      items:
+                        type: integer
+      responses:
+        '201':
+          description: Ação criada
+
+  /saas/virtual-technician/{id}:
+    get:
+      tags: [Virtual Technician]
+      summary: Ver detalhes da ação
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: organizationId
+          in: query
+          description: Obrigatório para roles globais
+          schema:
+            type: string
+        - name: tenantId
+          in: query
+          description: Obrigatório para roles globais e administradores sem tenant fixo
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Detalhes da ação
+
+    put:
+      tags: [Virtual Technician]
+      summary: Atualizar ação
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                organizationId:
+                  type: string
+                  description: Obrigatório para roles globais
+                tenantId:
+                  type: string
+                  description: Obrigatório para roles globais e administradores sem tenant fixo
+                name:
+                  type: string
+                status:
+                  type: string
+                  enum: [active, inactive]
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                actions:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        '200':
+          description: Ação atualizada
+
+    delete:
+      tags: [Virtual Technician]
+      summary: Deletar ação
+      description: Remove ação e limpa recursos (IoT Rule ou Schedule)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: organizationId
+          in: query
+          description: Obrigatório para roles globais
+          schema:
+            type: string
+        - name: tenantId
+          in: query
+          description: Obrigatório para roles globais e administradores sem tenant fixo
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Ação deletada
+
+  /saas/report:
+    get:
+      tags: [Report]
+      summary: Gerar relatório de telemetria
+      description: |
+        Gera relatório com dados de telemetria em um período de tempo.
+
+        **Filtros**:
+        - Range de datas (obrigatório, máx 30 dias)
+        - Equipamento específico (opcional)
+        - Variáveis/sensores (opcional)
+      parameters:
+        - name: organizationId
+          in: query
+          description: Obrigatório para roles globais
+          schema:
+            type: string
+        - name: tenantId
+          in: query
+          description: Obrigatório para roles globais e administradores sem tenant fixo
+          schema:
+            type: string
+        - name: start
+          in: query
+          required: true
+          description: Data inicial (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+            example: "2026-05-21T10:00:00Z"
+        - name: end
+          in: query
+          required: true
+          description: Data final (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+            example: "2026-05-21T18:00:00Z"
+        - name: equipmentId
+          in: query
+          description: Filtrar por equipamento específico
+          schema:
+            type: string
+        - name: variables
+          in: query
+          description: Variáveis separadas por vírgula (ex temperature,humidity)
+          schema:
+            type: string
+            example: "temperature,humidity,pressure"
+      responses:
+        '200':
+          description: Relatório gerado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      equipment:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            equipmentId:
+                              type: string
+                            name:
+                              type: string
+                            sensors:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  variable:
+                                    type: string
+                                  values:
+                                    type: array
+                                    items:
+                                      type: object
+                                      properties:
+                                        timestamp:
+                                          type: integer
+                                        datetime:
+                                          type: string
+                                        value:
+                                          oneOf:
+                                            - type: number
+                                            - type: string
+                            states:
+                              type: array
+                              description: Estados interpretados do equipamento (ex "andar", "subindo") no mesmo intervalo — mesmo formato de sensors, sem fallback de último valor (fora do intervalo é 'sem dado' mesmo).
+                              items:
+                                type: object
+                                properties:
+                                  variable:
+                                    type: string
+                                  values:
+                                    type: array
+                                    items:
+                                      type: object
+                                      properties:
+                                        timestamp:
+                                          type: integer
+                                        datetime:
+                                          type: string
+                                        value:
+                                          oneOf:
+                                            - type: integer
+                                            - type: string
+                                            - type: boolean
+                      period:
+                        type: object
+                        properties:
+                          start:
+                            type: string
+                          end:
+                            type: string
+                      summary:
+                        type: object
+                        properties:
+                          totalEquipment:
+                            type: integer
+                          totalDataPoints:
+                            type: integer
+
+  /saas/push-subscriptions:
+    post:
+      tags: [Push Notifications]
+      summary: Registrar subscription de push notification
+      description: |
+        Registra o FCM token do dispositivo para receber push notifications.
+        Deve ser chamado pelo app mobile após o login e sempre que o token FCM for renovado.
+
+        **Plataformas suportadas**: `android`, `ios`
+
+        Se o mesmo `deviceToken` já estiver registrado para o usuário, apenas atualiza o `updatedAt` sem criar duplicata.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deviceToken, platform]
+              properties:
+                deviceToken:
+                  type: string
+                  description: FCM token obtido pelo Firebase SDK no dispositivo
+                  example: "fGZ3...token_fcm"
+                platform:
+                  type: string
+                  enum: [android, ios]
+                  description: Plataforma do dispositivo
+                  example: "android"
+      responses:
+        '201':
+          description: Subscription registrada com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 201
+                  message:
+                    type: string
+                    example: Push subscription registrada com sucesso
+                  data:
+                    type: object
+                    properties:
+                      subscriptionId:
+                        type: string
+                        format: uuid
+                      platform:
+                        type: string
+                        enum: [android, ios]
+        '400':
+          description: Dados inválidos
+        '401':
+          description: Não autorizado
+
+  /saas/push-subscriptions/{id}:
+    delete:
+      tags: [Push Notifications]
+      summary: Remover subscription de push notification
+      description: |
+        Remove o registro de push notification do dispositivo.
+        Deve ser chamado ao fazer logout ou quando o usuário desativar notificações.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID da subscription retornado no registro
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Subscription removida com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: Push subscription removida com sucesso
+        '401':
+          description: Não autorizado
+        '404':
+          description: Subscription não encontrada
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token JWT obtido no login
+
+  schemas:
+    Organization:
+      type: object
+      properties:
+        organizationId:
+          type: string
+        name:
+          type: string
+        cnpj:
+          type: string
+          description: CNPJ normalizado (14 chars alfanuméricos, maiúsculos, sem máscara)
+          example: AB1234560001789
+        type:
+          type: string
+          enum: [ati, distributor]
+        status:
+          type: string
+          enum: [active, inactive]
+        createdAt:
+          type: string
+          format: date-time
+
+    Tenant:
+      type: object
+      properties:
+        tenantId:
+          type: string
+        organizationId:
+          type: string
+        name:
+          type: string
+        cnpj:
+          type: string
+          description: CNPJ normalizado (pessoa jurídica — 14 chars alfanuméricos, maiúsculos, sem máscara)
+          example: AB1234560001789
+        cpf:
+          type: string
+          description: CPF normalizado (pessoa física — 11 dígitos, sem máscara)
+          example: "12345678909"
+        status:
+          type: string
+          enum: [active, inactive]
+        createdAt:
+          type: string
+          format: date-time
+
+    User:
+      type: object
+      properties:
+        userId:
+          type: string
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        organizationId:
+          type: string
+        organizationName:
+          type: string
+        tenantId:
+          type: string
+        tenantName:
+          type: string
+        role:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive]
+
+    Equipment:
+      type: object
+      properties:
+        equipmentId:
+          type: string
+        organizationId:
+          type: string
+        tenantId:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        model:
+          type: string
+        local:
+          type: string
+        thingId:
+          type: string
+          description: Nome da Thing IoT associada ao equipamento.
+        endpoint:
+          type: string
+          description: Endpoint MQTT do IoT Core.
+        topic:
+          type: string
+          example: telemetry/ati-elevador-social-bloco-a
+        sensors:
+          type: object
+        states:
+          type: object
+          description: Estados interpretados do equipamento (ex "andar", "subindo") — mesmo formato de sensors, sem catálogo, só dataType (int/string/bool).
+        commands:
+          type: object
+          description: Comandos configurados no equipamento; ausente equivale a objeto vazio.
+          additionalProperties:
+            type: object
+            required: [name, dataType, resource]
+            additionalProperties: false
+            properties:
+              name: {type: string}
+              dataType: {type: string, enum: [bool, int, float, string]}
+              resource: {type: string}
+              allowedRoles:
+                type: array
+                items: {type: string}
+                description: Roles permitidos. Ausente = todos; lista vazia = nenhum.
+        lastSeen:
+          type: string
+          format: date-time
+          nullable: true
+          description: Última vez que o equipamento enviou telemetria (mantido pelo Router).
+        lastValues:
+          type: object
+          description: Último valor conhecido de cada sensor/estado (mantido pelo Router a cada mensagem recebida).
+        status:
+          type: string
+          enum: [active, inactive, maintenance]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    SensorType:
+      type: object
+      required: [typeId, name, category]
+      properties:
+        typeId:
+          type: string
+          example: vibration
+        name:
+          type: string
+          example: Sensor de Vibração
+        category:
+          type: string
+          enum: [analog, digital, relay, string]
+        defaultUnit:
+          type: string
+          example: Hz
+        description:
+          type: string
+
+    EquipmentModel:
+      type: object
+      required: [modelId, name, equipmentType, sensors]
+      properties:
+        organizationId:
+          type: string
+          example: PLATFORM
+          description: ID da organização (roles globais podem definir qualquer organização de negócio)
+        modelId:
+          type: string
+          example: otis_gen2
+        name:
+          type: string
+          example: Otis Gen2
+        equipmentType:
+          type: string
+          example: elevator
+        sensors:
+          type: object
+          description: Definições de variáveis e tipos de sensores mapeados
+          example:
+            temp_cabine:
+              sensorType: temperature_celsius
+              name: Sensor de Cabine
+              unit: "°C"
+        states:
+          type: object
+          description: Estados interpretados (ex "andar", "subindo") — mesmo formato de sensors, sem catálogo, só dataType (int/string/bool). Opcional.
+          example:
+            andar:
+              dataType: int
+              name: "Andar Atual"
+        commands:
+          type: object
+          description: Comandos suportados pelo modelo. Opcional; ausente equivale a objeto vazio.
+          additionalProperties:
+            type: object
+            required: [name, dataType, resource]
+            additionalProperties: false
+            properties:
+              name: {type: string}
+              dataType: {type: string, enum: [bool, int, float, string]}
+              resource: {type: string}
+              allowedRoles:
+                type: array
+                items: {type: string}
+                description: Roles permitidos. Ausente = todos; lista vazia = nenhum.
+
+    VirtualTechnicianAction:
+      type: object
+      properties:
+        actionId:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [action, notification, schedule]
+        equipmentId:
+          type: string
+        equipmentName:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive]
+        conditions:
+          type: array
+          items:
+            type: object
+            properties:
+              variable:
+                type: string
+              operator:
+                type: string
+                enum: ['=', '>', '<', '>=', '<=', '!=']
+              value:
+                type: string
+              type:
+                type: string
+                enum: [string, number, boolean]
+              condition:
+                type: string
+                enum: [AND, OR]
+        actions:
+          type: array
+          items:
+            type: object
+            properties:
+              variable:
+                type: string
+              value:
+                type: string
+              type:
+                type: string
+                enum: [string, number, boolean]
+              delay:
+                type: string
+        notification:
+          type: object
+        schedule:
+          type: object
+        ruleName:
+          type: string
+        scheduleName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      properties:
+        statusCode:
+          type: integer
+        message:
+          type: string
+        error:
+          type: object
+
+  responses:
+    Unauthorized:
+      description: Token inválido ou não informado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            statusCode: 401
+            message: Token não informado
+
+    Forbidden:
+      description: Acesso negado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            statusCode: 403
+            message: Acesso negado para esta organização
+
+    NotFound:
+      description: Recurso não encontrado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            statusCode: 404
+            message: Recurso não encontrado

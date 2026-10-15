@@ -1,0 +1,28 @@
+# Nao enviar credenciais, testes, Git ou caches ao build
+.git/
+.github/
+.gitignore
+.env
+.env.*
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage*
+tests/
+infra/
+docs/
+*.md
+*.log
+*.pdf
+*.docx
+*.xlsx
+
+# Configuracao de desenvolvimento (nao necessaria em runtime)
+requirements-dev.txt
+requirements.txt
+pytest.ini
+.dockerignore
+Dockerfile
+docker-compose*.yml

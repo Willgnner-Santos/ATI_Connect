@@ -1,0 +1,86 @@
+# SAM Configuration File
+# Para fazer deploy: sam deploy --config-env sandbox
+
+version = 0.1
+
+[default]
+[default.global.parameters]
+stack_name = "plataforma-ati-saas"
+region = "sa-east-1"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.validate.parameters]
+lint = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+confirm_changeset = false
+s3_bucket = "plataforma-ati-deploy-sandbox"
+s3_prefix = "plataforma-ati-saas"
+parameter_overrides = "Stage=sandbox Project=plataforma-ati"
+
+[default.sync.parameters]
+watch = true
+
+# ============================================
+# Environment: Sandbox (Development)
+# ============================================
+[sandbox]
+[sandbox.global.parameters]
+stack_name = "plataforma-ati-saas-sandbox"
+region = "sa-east-1"
+
+[sandbox.build.parameters]
+cached = true
+parallel = true
+
+[sandbox.deploy.parameters]
+capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+confirm_changeset = false
+s3_bucket = "plataforma-ati-deploy-sandbox"
+s3_prefix = "saas-sandbox"
+parameter_overrides = "Stage=sandbox Project=plataforma-ati LayerArn=arn:aws:lambda:sa-east-1:762233758861:layer:plataforma-ati-layer-sandbox:36 FirebaseServiceAccountSsmParam=/plataforma-ati/sandbox/firebase-service-account"
+tags = "Environment=sandbox Project=plataforma-ati"
+
+# ============================================
+# Environment: Staging (Pre-Production)
+# ============================================
+[staging]
+[staging.global.parameters]
+stack_name = "plataforma-ati-saas-staging"
+region = "sa-east-1"
+
+[staging.build.parameters]
+cached = true
+parallel = true
+
+[staging.deploy.parameters]
+capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+confirm_changeset = true
+s3_bucket = "plataforma-ati-deploy-staging"
+s3_prefix = "saas-staging"
+parameter_overrides = "Stage=staging Project=plataforma-ati FirebaseServiceAccountSsmParam=/plataforma-ati/staging/firebase-service-account"
+tags = "Environment=staging Project=plataforma-ati"
+
+# ============================================
+# Environment: Production
+# ============================================
+[production]
+[production.global.parameters]
+stack_name = "plataforma-ati-saas-production"
+region = "sa-east-1"
+
+[production.build.parameters]
+cached = true
+parallel = true
+
+[production.deploy.parameters]
+capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+confirm_changeset = true
+s3_bucket = "plataforma-ati-deploy-production"
+s3_prefix = "saas-production"
+parameter_overrides = "Stage=production Project=plataforma-ati FirebaseServiceAccountSsmParam=/plataforma-ati/production/firebase-service-account"
+tags = "Environment=production Project=plataforma-ati"

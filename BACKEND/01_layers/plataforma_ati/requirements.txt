@@ -1,0 +1,7 @@
+# Direct dependencies observed in the supplied layer, except boto3 (AWS SDK).
+# Third-party source/binaries belong in .aws-sam/, not in python/.
+# boto3 is bundled to avoid mixing its dependencies with the managed runtime SDK.
+boto3>=1.34,<2
+bleach==6.0.0
+requests==2.34.2
+firebase-admin==7.5.0

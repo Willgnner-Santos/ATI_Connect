@@ -1,0 +1,8 @@
+BEGIN;
+
+ALTER TABLE fault_tree_versions
+    ADD COLUMN IF NOT EXISTS progress SMALLINT NULL,
+    ADD COLUMN IF NOT EXISTS progress_phase VARCHAR NULL,
+    ADD COLUMN IF NOT EXISTS progress_message TEXT NULL;
+
+COMMIT;

@@ -1,0 +1,3 @@
+# Compatibilidade: uma unica fonte de versoes e hashes para runtime.
+# Para modificar dependencias, edite requirements.in e regenere requirements.lock.
+-r requirements.lock

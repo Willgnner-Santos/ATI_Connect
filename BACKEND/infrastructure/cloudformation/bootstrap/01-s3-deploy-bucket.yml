@@ -1,0 +1,48 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Plataforma ATI — S3 Deploy Bucket
+  Bucket S3 usado por scripts/update-lambdas.ps1 para armazenar artefatos de codigo.
+  Nao substitui os buckets por stage configurados no samconfig.toml.
+
+Parameters:
+  Project:
+    Type: String
+    Default: plataforma-ati
+  Region:
+    Type: String
+
+Resources:
+
+  DeployBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain   # Nunca deletar o bucket no stack removal — perda de artefatos
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${Project}-serverless-deploys-${Region}"
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldDeployments
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30   # Mantém 30 dias de histórico de versões
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: ATI
+          Value: ATI
+        - Key: project
+          Value: !Ref Project
+        - Key: managed-by
+          Value: cloudformation
+
+Outputs:
+  BucketName:
+    Description: Nome do bucket de deploy
+    Value: !Ref DeployBucket
+    Export:
+      Name: !Sub "${Project}-deploy-bucket"

@@ -1,0 +1,1591 @@
+{
+  "info": {
+    "_postman_id": "saas-platform-ati-2026",
+    "name": "Plataforma ATI - SaaS API",
+    "description": "Collection completa da API SaaS multi-tenant da Plataforma ATI.\n\n**Ambientes:**\n- Sandbox: https://2wdbgmcijd.execute-api.sa-east-1.amazonaws.com/sandbox\n- Production: TBD\n\n**Autenticação:**\n1. Fazer login em `/saas/auth/login`\n2. O `access_token` é salvo automaticamente na variável de collection `{{token}}`\n3. Token é usado nos demais requests via variável `{{token}}`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "01. Authentication",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('token', response.data.authorization.access_token);",
+                  "    pm.collectionVariables.set('refresh_token', response.data.authorization.refresh_token);",
+                  "    pm.collectionVariables.set('organizationId', response.data.user.organizationId);",
+                  "    pm.collectionVariables.set('username', response.data.user.username);",
+                  "    console.log('✅ Token e username salvos nas variáveis de collection');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@plataforma-ati.com\",\n  \"password\": \"{{superadmin_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/saas/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "auth", "login"]
+            },
+            "description": "Autentica usuário no sistema SaaS.\n\nA senha do superadmin deve ser fornecida pela variável `superadmin_password`; não existe credencial padrão versionada.\n\n**Retorna:**\n- access_token (válido por 1 hora)\n- refresh_token (válido por 30 dias)\n- id_token\n- Dados do usuário (organizationId, tenantId, role)\n\nAccess token, refresh token, organizationId e username são salvos automaticamente nas variáveis de collection."
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('token', response.data.access_token);",
+                  "    console.log('✅ Token renovado');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refresh_token}}\",\n  \"username\": \"{{username}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/saas/auth/refresh",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "auth", "refresh"]
+            },
+            "description": "Renova o access_token usando refresh_token.\n\n**Body:**\n- refreshToken: Token obtido no login (variável `{{refresh_token}}`)\n- username: Sub do usuário (variável `{{username}}`, salvo automaticamente após login)"
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "auth", "logout"]
+            },
+            "description": "Invalida o token atual (global sign-out no Cognito). Requer o access_token no header Authorization."
+          },
+          "response": []
+        },
+        {
+          "name": "Forgot Password",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@plataforma-ati.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/saas/auth/forgot-password",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "auth", "forgot-password"]
+            },
+            "description": "Solicita código de recuperação de senha (enviado por email). Sempre retorna 200 com mensagem genérica (segurança)."
+          },
+          "response": []
+        },
+        {
+          "name": "Reset Password",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@plataforma-ati.com\",\n  \"code\": \"123456\",\n  \"newPassword\": \"{{new_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/saas/auth/reset-password",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "auth", "reset-password"]
+            },
+            "description": "Confirma nova senha com código recebido por email."
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints de autenticação e gerenciamento de senha"
+    },
+    {
+      "name": "02. Organizations",
+      "item": [
+        {
+          "name": "List Organizations",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/organization",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "organization"],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "",
+                  "description": "ID específico da organização (retorna apenas aquela organização)",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "all",
+                  "description": "Filtra por status (ex: active, inactive ou all)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Lista organizações.\n\n- **Superadmin/Collaborator**: Veem todas as organizações de negócio\n- **Admin**: Vê apenas a própria organização\n\nUse o parâmetro `id` para buscar uma organização específica."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Organization",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('test_organizationId', response.data.organizationId);",
+                  "    console.log('✅ Organization criada:', response.data.organizationId);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Distribuidora Teste\",\n  \"email\": \"contato@distribuidora.com\",\n  \"cnpj\": \"12.345.678/0001-99\",\n  \"type\": \"distributor\",\n  \"admin\": {\n    \"name\": \"Admin Distribuidora\",\n    \"email\": \"admin@distribuidora.com\",\n    \"password\": \"Admin123!\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/saas/organization",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "organization"]
+            },
+            "description": "Cria nova organização (distribuidora).\n\n**Campos obrigatórios:** `name`, `email`, `cnpj`\n\n**Campo opcional `admin`:** cria automaticamente um usuário administrador para a organização. Use `admin` (não `user`).\n\n**Cria automaticamente:**\n- Organização\n- Roles padrão (admin, manager, viewer)\n- Usuário admin (se enviado no campo `admin`)"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Organization",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/organization/{{test_organizationId}}",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "organization", "{{test_organizationId}}"]
+            },
+            "description": "Soft delete de uma organização (exclusão lógica). Desativa também todos os usuários associados."
+          },
+          "response": []
+        },
+        {
+          "name": "Reactivate Organization",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/organization/{{test_organizationId}}/reactivate",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "organization", "{{test_organizationId}}", "reactivate"]
+            },
+            "description": "Reativa uma organização desativada e re-habilita seus usuários no Cognito."
+          },
+          "response": []
+        }
+      ],
+      "description": "Gerenciamento de organizações (distribuidoras)"
+    },
+    {
+      "name": "03. Tenants",
+      "item": [
+        {
+          "name": "List Tenants",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/tenant",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "tenant"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "all",
+                  "description": "Filtra por status (ex: active, inactive ou all)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Lista tenants da organização do usuário logado."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Tenant",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('test_tenantId', response.data.tenantId);",
+                  "    console.log('✅ Tenant criado:', response.data.tenantId);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organizationId\": \"{{organizationId}}\",\n  \"name\": \"Cliente ABC Ltda\",\n  \"cnpj\": \"12.345.678/0001-99\",\n  \"user\": {\n    \"name\": \"João Silva\",\n    \"email\": \"joao@cliente-abc.com\",\n    \"password\": \"Senha@2026\",\n    \"role\": \"admin\",\n    \"tenantRole\": \"technician\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/saas/tenant",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "tenant"]
+            },
+            "description": "Cria novo tenant (cliente) dentro da organização.\n\n**Campos obrigatórios:**\n- `organizationId`: ID da organização\n- `name`: Nome do tenant (único dentro da organização)\n- `cnpj` **ou** `cpf` (obrigatório um dos dois, nunca ambos)\n\n**CNPJ / CPF:**\n- `cnpj`: Pessoa jurídica — `XX.XXX.XXX/XXXX-XX` ou 14 chars alfanuméricos. Suporta o novo formato alfanumérico (vigência 2026).\n- `cpf`: Pessoa física — `XXX.XXX.XXX-XX` ou 11 dígitos.\n\n**Campo opcional `user`:** cria automaticamente um usuário para o tenant.\n\n**Permissões:**\n- Requer `tenant:create`\n- Superadmin e collaborator podem criar em qualquer organização de negócio\n- Admin só pode criar na própria organização"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Tenant",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/tenant/{{test_tenantId}}",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "tenant", "{{test_tenantId}}"]
+            },
+            "description": "Soft delete de um tenant (exclusão lógica). Desativa também todos os usuários associados."
+          },
+          "response": []
+        },
+        {
+          "name": "Reactivate Tenant",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/tenant/{{test_tenantId}}/reactivate",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "tenant", "{{test_tenantId}}", "reactivate"]
+            },
+            "description": "Reativa um tenant desativado e re-habilita seus usuários no Cognito."
+          },
+          "response": []
+        }
+      ],
+      "description": "Gerenciamento de tenants (clientes finais)"
+    },
+    {
+      "name": "04. Users",
+      "item": [
+        {
+          "name": "List Users",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/user",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "user"],
+              "query": [
+                {
+                  "key": "organizationId",
+                  "value": "{{organizationId}}",
+                  "description": "Filtrar por organização (roles globais)",
+                  "disabled": true
+                },
+                {
+                  "key": "tenantId",
+                  "value": "{{test_tenantId}}",
+                  "description": "Filtrar por tenant",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Lista usuários. Sem filtros, retorna usuários do escopo do token (org/tenant do usuário logado).\n\n- **Superadmin/Collaborator**: podem filtrar por qualquer organização ou tenant via query params\n- **Admin**: vê usuários da própria organização\n- **Manager**: vê usuários do próprio tenant"
+          },
+          "response": []
+        },
+        {
+          "name": "Create User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('test_userId', response.data.userId);",
+                  "    console.log('✅ User criado:', response.data.userId);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"João Silva\",\n  \"email\": \"joao.silva@cliente-abc.com\",\n  \"organizationId\": \"{{organizationId}}\",\n  \"role\": \"admin\",\n  \"tenantRole\": \"technician\",\n  \"tenantId\": \"{{test_tenantId}}\",\n  \"password\": \"Senha@2026\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/saas/user",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "user"]
+            },
+            "description": "Cria novo usuário e registra no Cognito + DynamoDB.\n\n**Campos obrigatórios:**\n- `name`: Nome completo\n- `email`: Email (username no Cognito, deve ser único)\n- `organizationId`: ID da organização\n- `role`: Role existente na organização alvo\n\n**Campos opcionais:**\n- `tenantId`: ID do tenant (se omitido, usuário fica no nível organização)\n- `tenantRole`: Role operacional no tenant (`client` ou `technician`)\n- `password`: Senha inicial (se omitido, Cognito envia email com senha temporária)\n\n**Roles disponíveis:**\n- `superadmin`: Acesso total (apenas PLATFORM)\n- `collaborator`: Administração global das organizações de negócio (apenas PLATFORM)\n- `admin`: Administrador da organização\n- `manager`: Gerente de tenant\n- `viewer`: Visualizador (apenas leitura)"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Collaborator (Superadmin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Colaborador ATI\",\n  \"email\": \"{{collaborator_email}}\",\n  \"organizationId\": \"PLATFORM\",\n  \"tenantId\": \"none\",\n  \"role\": \"collaborator\",\n  \"password\": \"{{collaborator_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/saas/user",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "user"]
+            },
+            "description": "Cria uma conta collaborator em PLATFORM. Requer token de superadmin. Preencha as variáveis de collection `collaborator_email` e `collaborator_password` antes de enviar."
+          },
+          "response": []
+        },
+        {
+          "name": "Update User",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"João Silva (Atualizado)\",\n  \"role\": \"admin\",\n  \"tenantRole\": \"technician\",\n  \"status\": \"active\",\n  \"password\": \"NovaSenha123!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/saas/user/{{test_userId}}",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "user", "{{test_userId}}"]
+            },
+            "description": "Atualiza dados do usuário. Todos os campos são opcionais (atualização parcial)."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete User",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/user/{{test_userId}}",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "user", "{{test_userId}}"]
+            },
+            "description": "Deleta usuário (soft delete — desativa no Cognito e no DynamoDB)."
+          },
+          "response": []
+        },
+        {
+          "name": "Reactivate User",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/user/{{test_userId}}/reactivate",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "user", "{{test_userId}}", "reactivate"]
+            },
+            "description": "Reativa um usuário desativado no Cognito e no DynamoDB."
+          },
+          "response": []
+        }
+      ],
+      "description": "Gerenciamento de usuários"
+    },
+    {
+      "name": "05. Equipment",
+      "item": [
+        {
+          "name": "List Equipment",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/equipment",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "equipment"],
+              "query": [
+                {
+                  "key": "tenantId",
+                  "value": "{{test_tenantId}}",
+                  "description": "Filtrar por tenant (roles globais ou admin)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Lista equipamentos do tenant do usuário logado."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Equipment",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('test_equipmentId', response.data.equipmentId);",
+                  "    pm.test('Credenciais IoT retornadas', function () {",
+                  "        pm.expect(response.data.iot.certificatePem).to.include('BEGIN CERTIFICATE');",
+                  "        pm.expect(response.data.iot.privateKey).to.include('BEGIN');",
+                  "        pm.expect(response.data.iot.amazonRootCA1).to.include('BEGIN CERTIFICATE');",
+                  "    });",
+                  "    console.log('✅ Equipment criado:', response.data.equipmentId);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organizationId\": \"{{organizationId}}\",\n  \"tenantId\": \"{{test_tenantId}}\",\n  \"name\": \"Elevador Social - Bloco A\",\n  \"equipmentType\": \"elevator\",\n  \"model\": \"Atlas HydroX 2000\",\n  \"modelId\": \"atlas_hydrox_2000\",\n  \"local\": \"Edifício Central - Bloco A\",\n  \"sensors\": {\n    \"temperature\": {\"sensorType\": \"temperature\", \"unit\": \"°C\", \"name\": \"Temperatura do Motor\"},\n    \"vibration\": {\"sensorType\": \"analog\", \"unit\": \"Hz\", \"name\": \"Vibração\"},\n    \"door_status\": {\"sensorType\": \"digital\", \"unit\": \"bool\", \"name\": \"Status da Porta\"}\n  },\n  \"states\": {\n    \"subindo\": {\"dataType\": \"bool\", \"name\": \"Subindo\"}\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/saas/equipment",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "equipment"]
+            },
+            "description": "Cria novo equipamento IoT com certificados e Thing no AWS IoT Core.\n\n**Campos obrigatórios:** `organizationId`, `tenantId`, `name`, `equipmentType`, `model`, `local`, `sensors`\n\n**Campos opcionais:**\n- `modelId`: ID do modelo de equipamento no catálogo (`^[a-z0-9_]+$`). Quando informado, vincula o equipamento ao modelo e dispara a cópia da árvore de falhas do modelo para o equipamento no serviço arvore-de-falhas.\n- `states`: Estados interpretados (ex: andar, subindo) — só `dataType` (int/string/bool), sem catálogo\n- `commands`: Comandos do equipamento (cada um com `name`, `resource`, `dataType` e opcional `allowedRoles`)\n\n**Resposta:** retorna `iot` com `certificatePem`, `privateKey`, `amazonRootCA1` e `endpoint`.\nAs credenciais são retornadas **UMA ÚNICA VEZ** — armazene imediatamente:\n- `certificatePem` → certificate.pem.crt\n- `privateKey` → private.pem.key (manter em segredo)\n- `amazonRootCA1` → AmazonRootCA1.pem"
+          },
+          "response": []
+        },
+        {
+          "name": "View Equipment",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/equipment/{{test_equipmentId}}",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "equipment", "{{test_equipmentId}}"]
+            },
+            "description": "Busca detalhes completos de um equipamento.\n\nRetorna em `data`: `equipmentId`, `organizationId`, `tenantId`, `name`, `type`, `model`, `local`, `thingId`, `endpoint`, `topic`, `sensors`, `states`, `commands`, `lastSeen`, `lastValues`, `status`, `createdAt`, `updatedAt`.\n\n- `lastSeen` / `lastValues`: atualizados pelo Telemetry Router a cada telemetria recebida; vêm `null` / `{}` enquanto o equipamento nunca reportou.\n\n`iotMetadata` (ARN e ID do certificado) NÃO é retornado — o certificado e a private key só são devolvidos uma única vez, na criação."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Equipment",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Elevador Social (Atualizado)\",\n  \"status\": \"inactive\",\n  \"states\": {\n    \"subindo\": {\"dataType\": \"bool\", \"name\": \"Subindo\"}\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/saas/equipment/{{test_equipmentId}}",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "equipment", "{{test_equipmentId}}"]
+            },
+            "description": "Atualiza equipamento. Todos os campos são opcionais (atualização parcial).\n\n**Campos aceitos:** `name`, `local`, `model`, `equipmentType`, `status`, `sensors`, `states`, `commands`\n\n**Regra:** se `sensors`, `states` ou `commands` forem enviados, não podem ser objetos vazios."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Equipment",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/equipment/{{test_equipmentId}}",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "equipment", "{{test_equipmentId}}"]
+            },
+            "description": "Deleta equipamento e seus recursos no AWS IoT Core (Thing + certificado)."
+          },
+          "response": []
+        },
+        {
+          "name": "List Equipment Actions",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/equipment/{{test_equipmentId}}/action",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "equipment", "{{test_equipmentId}}", "action"]
+            },
+            "description": "Lista os comandos cadastrados no equipamento que o papel do usuário (tenantRole) tem permissão de enviar.\n\nRetorna `commands` com os campos `variable`, `name`, `resource`, `dataType` e `allowedRoles` (ausente = todos podem; lista vazia = nenhum pode)."
+          },
+          "response": []
+        },
+        {
+          "name": "Send Equipment Command",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"command\": \"led\",\n  \"value\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/saas/equipment/{{test_equipmentId}}/action",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "equipment", "{{test_equipmentId}}", "action"]
+            },
+            "description": "Publica um comando no tópico MQTT do equipamento, caso o tenantRole do usuário tenha permissão.\n\n**Body:**\n- `command`: Nome do comando cadastrado no equipamento\n- `value`: Valor a ser enviado (int, string ou bool)"
+          },
+          "response": []
+        }
+      ],
+      "description": "Gerenciamento de equipamentos (agnóstico de tipo)"
+    },
+    {
+      "name": "06. Dashboard",
+      "item": [
+        {
+          "name": "Get Dashboard",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/dashboard?lastMinutes=15",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "dashboard"],
+              "query": [
+                {
+                  "key": "lastMinutes",
+                  "value": "15",
+                  "description": "Minutos de histórico de telemetria (1-1440). Padrão: 5"
+                },
+                {
+                  "key": "organizationId",
+                  "value": "{{organizationId}}",
+                  "description": "Filtrar por organização (roles globais: superadmin ou collaborator)",
+                  "disabled": true
+                },
+                {
+                  "key": "tenantId",
+                  "value": "{{test_tenantId}}",
+                  "description": "Filtrar por tenant (roles globais ou Org Admin)",
+                  "disabled": true
+                },
+                {
+                  "key": "equipmentId",
+                  "value": "{{test_equipmentId}}",
+                  "description": "Filtrar por equipamento específico (retorna série histórica completa)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "**Obter dados do dashboard com telemetria de equipamentos**\n\n**O que retorna:**\n- Lista de todos os equipamentos ativos do tenant\n- Valores dos sensores/estados nos últimos N minutos\n- Credenciais AWS STS temporárias para MQTT (válidas por 1 hora)\n- Endpoints e tópicos IoT de cada equipamento\n\n**Query params:**\n- `lastMinutes`: Quantidade de minutos de histórico (1-1440, padrão: 5)\n- `organizationId`: Roles globais (superadmin/collaborator)\n- `tenantId`: Roles globais ou Org Admin\n- `equipmentId`: Necessário para retornar a série histórica completa de telemetria\n\n**Uso típico:**\n1. Frontend chama este endpoint ao carregar dashboard\n2. Renderiza equipamentos e gráficos com dados históricos\n3. Usa credenciais MQTT para subscrever aos tópicos e receber atualizações em tempo real"
+          },
+          "response": []
+        }
+      ],
+      "description": "Dashboards e métricas"
+    },
+    {
+      "name": "07. Virtual Technician",
+      "item": [
+        {
+          "name": "List Actions",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/virtual-technician?type=action&status=active",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "virtual-technician"],
+              "query": [
+                {
+                  "key": "equipmentId",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Filtrar por equipamento"
+                },
+                {
+                  "key": "type",
+                  "value": "action",
+                  "description": "Tipo: action, notification ou schedule"
+                },
+                {
+                  "key": "status",
+                  "value": "active",
+                  "description": "Status: active ou inactive"
+                }
+              ]
+            },
+            "description": "Lista todas as ações do técnico virtual com filtros opcionais."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Action",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organizationId\": \"{{organizationId}}\",\n  \"tenantId\": \"{{test_tenantId}}\",\n  \"name\": \"Ligar ventilação se superaquecer\",\n  \"type\": \"action\",\n  \"equipmentId\": \"{{test_equipmentId}}\",\n  \"status\": \"active\",\n  \"conditions\": [\n    {\n      \"variable\": \"temperature\",\n      \"operator\": \">\",\n      \"value\": \"40\",\n      \"type\": \"number\",\n      \"condition\": \"AND\"\n    }\n  ],\n  \"actions\": [\n    {\n      \"variable\": \"fan\",\n      \"value\": \"on\",\n      \"type\": \"boolean\",\n      \"delay\": \"0\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/saas/virtual-technician",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "virtual-technician"]
+            },
+            "description": "Criar ação automática.\n\n`organizationId` e `tenantId` são obrigatórios para roles globais e administradores sem tenant fixo.\n\nPara notificações, use prefixo `tg:` no recipient para enviar via Telegram (ex: `tg:12345678`)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Action",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/virtual-technician/{{action_id}}?organizationId={{organizationId}}&tenantId={{test_tenantId}}",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "virtual-technician", "{{action_id}}"],
+              "query": [
+                {
+                  "key": "organizationId",
+                  "value": "{{organizationId}}"
+                },
+                {
+                  "key": "tenantId",
+                  "value": "{{test_tenantId}}"
+                }
+              ]
+            },
+            "description": "Ver detalhes de uma ação do técnico virtual."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Action",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organizationId\": \"{{organizationId}}\",\n  \"tenantId\": \"{{test_tenantId}}\",\n  \"status\": \"inactive\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/saas/virtual-technician/{{action_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "virtual-technician", "{{action_id}}"]
+            },
+            "description": "Atualizar ação (suporte a atualização parcial). `organizationId` e `tenantId` são obrigatórios para roles globais e administradores sem tenant fixo."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Action",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/virtual-technician/{{action_id}}?organizationId={{organizationId}}&tenantId={{test_tenantId}}",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "virtual-technician", "{{action_id}}"],
+              "query": [
+                {
+                  "key": "organizationId",
+                  "value": "{{organizationId}}"
+                },
+                {
+                  "key": "tenantId",
+                  "value": "{{test_tenantId}}"
+                }
+              ]
+            },
+            "description": "Deletar ação e limpar recursos (IoT Rule ou EventBridge Schedule)."
+          },
+          "response": []
+        }
+      ],
+      "description": "Técnico Virtual — Automações e ações programadas"
+    },
+    {
+      "name": "08. Reports",
+      "item": [
+        {
+          "name": "Generate Report",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/report?organizationId={{organizationId}}&tenantId={{test_tenantId}}&start=2026-05-21T10:00:00Z&end=2026-05-21T18:00:00Z&variables=temperature,humidity",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "report"],
+              "query": [
+                {
+                  "key": "organizationId",
+                  "value": "{{organizationId}}",
+                  "description": "Obrigatório para roles globais"
+                },
+                {
+                  "key": "tenantId",
+                  "value": "{{test_tenantId}}",
+                  "description": "Obrigatório para roles globais e administradores sem tenant fixo"
+                },
+                {
+                  "key": "start",
+                  "value": "2026-05-21T10:00:00Z",
+                  "description": "Data inicial (ISO 8601) — obrigatório"
+                },
+                {
+                  "key": "end",
+                  "value": "2026-05-21T18:00:00Z",
+                  "description": "Data final (ISO 8601) — obrigatório"
+                },
+                {
+                  "key": "equipmentId",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Filtrar por equipamento específico"
+                },
+                {
+                  "key": "variables",
+                  "value": "temperature,humidity",
+                  "description": "Variáveis separadas por vírgula"
+                }
+              ]
+            },
+            "description": "Gerar relatório de telemetria com filtros de data (máx 30 dias)."
+          },
+          "response": []
+        }
+      ],
+      "description": "Relatórios de telemetria"
+    },
+    {
+      "name": "09. Catalog - Sensor Type",
+      "item": [
+        {
+          "name": "List Sensor Types",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/catalog/sensor-type",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "catalog", "sensor-type"]
+            },
+            "description": "Lista todos os tipos de sensores cadastrados no catálogo global."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Sensor Type",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"typeId\": \"vibration_x\",\n  \"name\": \"Sensor de Vibração Eixo X\",\n  \"category\": \"analog\",\n  \"defaultUnit\": \"Hz\",\n  \"description\": \"Mede a frequência de vibração no eixo horizontal\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/saas/catalog/sensor-type",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "catalog", "sensor-type"]
+            },
+            "description": "Cadastra um novo tipo de sensor no catálogo global. Apenas o Superadmin tem permissão."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Sensor Type",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/catalog/sensor-type/{{sensor_type_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "catalog", "sensor-type", "{{sensor_type_id}}"]
+            },
+            "description": "Exclui um tipo de sensor do catálogo global. Apenas o Superadmin tem permissão."
+          },
+          "response": []
+        }
+      ],
+      "description": "Gerenciamento do catálogo global de tipos de sensores"
+    },
+    {
+      "name": "10. Catalog - Equipment Model",
+      "item": [
+        {
+          "name": "List Equipment Models",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/catalog/equipment-model",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "catalog", "equipment-model"],
+              "query": [
+                {
+                  "key": "organizationId",
+                  "value": "",
+                  "description": "Filtro por organização (roles globais)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Lista todos os modelos de equipamentos cadastrados para a organização do usuário."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Equipment Model",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organizationId\": \"PLATFORM\",\n  \"modelId\": \"otis_gen2\",\n  \"name\": \"Otis Gen2\",\n  \"equipmentType\": \"elevator\",\n  \"sensors\": {\n    \"temp_cabine\": {\n      \"sensorType\": \"temperature_celsius\",\n      \"name\": \"Sensor de Cabine\",\n      \"unit\": \"°C\"\n    },\n    \"andar\": {\n      \"sensorType\": \"current_floor\",\n      \"name\": \"Andar Atual\",\n      \"unit\": \"floor\"\n    }\n  },\n  \"states\": {\n    \"subindo\": {\"dataType\": \"bool\", \"name\": \"Subindo\"}\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/saas/catalog/equipment-model",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "catalog", "equipment-model"]
+            },
+            "description": "Cadastra um novo modelo de equipamento para a organização. Requer permissão de escrita de catalog. Roles globais especificam `organizationId` no corpo."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Equipment Model",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Otis Gen2 Modificado\",\n  \"sensors\": {\n    \"temp_cabine\": {\n      \"sensorType\": \"temperature_celsius\",\n      \"name\": \"Sensor de Cabine Modificado\",\n      \"unit\": \"°C\"\n    }\n  },\n  \"states\": {\n    \"subindo\": {\"dataType\": \"bool\", \"name\": \"Subindo\"}\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/saas/catalog/equipment-model/{{model_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "catalog", "equipment-model", "{{model_id}}"],
+              "query": [
+                {
+                  "key": "organizationId",
+                  "value": "",
+                  "description": "ID da organização dona do modelo (obrigatório para roles globais se não informado no corpo)"
+                }
+              ]
+            },
+            "description": "Atualiza um modelo de equipamento na organização. Requer permissão de escrita de catalog. Para roles globais, é obrigatório informar a organização alvo (`organizationId`) via query parameter ou no corpo."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Equipment Model",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/catalog/equipment-model/{{model_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "catalog", "equipment-model", "{{model_id}}"],
+              "query": [
+                {
+                  "key": "organizationId",
+                  "value": "",
+                  "description": "ID da organização dona do modelo (obrigatório para roles globais)"
+                }
+              ]
+            },
+            "description": "Exclui um modelo de equipamento do catálogo da organização. Requer permissão de escrita de equipment."
+          },
+          "response": []
+        }
+      ],
+      "description": "Gerenciamento do catálogo de modelos de equipamentos por organização"
+    },
+    {
+      "name": "11. Push Notifications",
+      "item": [
+        {
+          "name": "Register Push Subscription",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceToken\": \"<fcm-token-do-dispositivo>\",\n  \"platform\": \"android\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/saas/push-subscriptions",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "push-subscriptions"]
+            },
+            "description": "Registra o FCM token do dispositivo para receber push notifications. Chamar após login e sempre que o token FCM for renovado. Plataformas: android | ios."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Push Subscription",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/saas/push-subscriptions/{{subscription_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["saas", "push-subscriptions", "{{subscription_id}}"]
+            },
+            "description": "Remove o registro de push notification do dispositivo. Chamar ao fazer logout ou quando o usuário desativar notificações."
+          },
+          "response": []
+        }
+      ],
+      "description": "Gerenciamento de subscriptions de push notifications (FCM)"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const token = pm.collectionVariables.get('token');",
+          "if (token) {",
+          "    try {",
+          "        const base64Url = token.split('.')[1];",
+          "        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');",
+          "        const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {",
+          "            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);",
+          "        }).join(''));",
+          "        const payload = JSON.parse(jsonPayload);",
+          "        const exp = payload.exp * 1000;",
+          "        if (exp < Date.now()) {",
+          "            console.warn('⚠️ Token expirado! Use o endpoint Refresh Token.');",
+          "        }",
+          "    } catch(e) {}",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://2wdbgmcijd.execute-api.sa-east-1.amazonaws.com/sandbox",
+      "type": "string"
+    },
+    {
+      "key": "superadmin_password",
+      "value": "",
+      "type": "secret"
+    },
+    {
+      "key": "new_password",
+      "value": "",
+      "type": "secret"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "username",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "organizationId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "test_organizationId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "test_tenantId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "test_equipmentId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "test_userId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "action_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "sensor_type_id",
+      "value": "vibration_x",
+      "type": "string"
+    },
+    {
+      "key": "model_id",
+      "value": "otis_gen2",
+      "type": "string"
+    },
+    {
+      "key": "collaborator_email",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "collaborator_password",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

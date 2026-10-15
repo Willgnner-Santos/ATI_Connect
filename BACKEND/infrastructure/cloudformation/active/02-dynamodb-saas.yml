@@ -1,0 +1,538 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Plataforma ATI — DynamoDB SaaS
+  Template exclusivo da base multi-tenant para Organizations, Tenants, Roles,
+  Equipment, IoT data e Audit Log.
+
+Parameters:
+  Project:
+    Type: String
+    Default: plataforma-ati
+  Stage:
+    Type: String
+    AllowedValues: [sandbox, staging, production, prod]
+
+Resources:
+
+  OrganizationsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub "${Project}-${Stage}-organizations"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+        - AttributeName: organizationId
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: organizationId-index
+          KeySchema:
+            - AttributeName: organizationId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: status-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: ATI
+          Value: ATI
+        - Key: project
+          Value: !Ref Project
+        - Key: stage
+          Value: !Ref Stage
+        - Key: managed-by
+          Value: cloudformation
+
+  TenantsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub "${Project}-${Stage}-tenants"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+        - AttributeName: organizationId
+          AttributeType: S
+        - AttributeName: tenantId
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: organizationId-index
+          KeySchema:
+            - AttributeName: organizationId
+              KeyType: HASH
+            - AttributeName: sk
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: tenantId-index
+          KeySchema:
+            - AttributeName: tenantId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: status-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: ATI
+          Value: ATI
+        - Key: project
+          Value: !Ref Project
+        - Key: stage
+          Value: !Ref Stage
+        - Key: managed-by
+          Value: cloudformation
+
+  TenantUsersTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub "${Project}-${Stage}-tenant-users"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+        - AttributeName: organizationId
+          AttributeType: S
+        - AttributeName: tenantId
+          AttributeType: S
+        - AttributeName: role
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: organizationId-index
+          KeySchema:
+            - AttributeName: organizationId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: tenantId-index
+          KeySchema:
+            - AttributeName: tenantId
+              KeyType: HASH
+            - AttributeName: role
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: ATI
+          Value: ATI
+        - Key: project
+          Value: !Ref Project
+        - Key: stage
+          Value: !Ref Stage
+        - Key: managed-by
+          Value: cloudformation
+
+  TenantEquipmentTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub "${Project}-${Stage}-tenant-equipment"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+        - AttributeName: organizationId
+          AttributeType: S
+        - AttributeName: tenantId
+          AttributeType: S
+        - AttributeName: type
+          AttributeType: S
+        - AttributeName: equipmentId
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: thingId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: equipmentId-index
+          KeySchema:
+            - AttributeName: equipmentId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: thingId-index
+          KeySchema:
+            - AttributeName: thingId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: organizationId-tenantId-index
+          KeySchema:
+            - AttributeName: organizationId
+              KeyType: HASH
+            - AttributeName: tenantId
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: tenantId-type-index
+          KeySchema:
+            - AttributeName: tenantId
+              KeyType: HASH
+            - AttributeName: type
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: status-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: ATI
+          Value: ATI
+        - Key: project
+          Value: !Ref Project
+        - Key: stage
+          Value: !Ref Stage
+        - Key: managed-by
+          Value: cloudformation
+
+  TenantEquipmentTelemetryTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub "${Project}-${Stage}-tenant-equipment-telemetry"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: N
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+      Tags:
+        - Key: ATI
+          Value: ATI
+        - Key: project
+          Value: !Ref Project
+        - Key: stage
+          Value: !Ref Stage
+        - Key: managed-by
+          Value: cloudformation
+
+  OrganizationRolesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub "${Project}-${Stage}-organization-roles"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+        - AttributeName: organizationId
+          AttributeType: S
+        - AttributeName: roleName
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: organizationId-index
+          KeySchema:
+            - AttributeName: organizationId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: roleName-index
+          KeySchema:
+            - AttributeName: roleName
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: ATI
+          Value: ATI
+        - Key: project
+          Value: !Ref Project
+        - Key: stage
+          Value: !Ref Stage
+        - Key: managed-by
+          Value: cloudformation
+
+  AuditLogTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub "${Project}-${Stage}-audit-log"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+        - AttributeName: organizationId
+          AttributeType: S
+        - AttributeName: tenantId
+          AttributeType: S
+        - AttributeName: action
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: organizationId-index
+          KeySchema:
+            - AttributeName: organizationId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: tenantId-index
+          KeySchema:
+            - AttributeName: tenantId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: action-index
+          KeySchema:
+            - AttributeName: action
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+      Tags:
+        - Key: ATI
+          Value: ATI
+        - Key: project
+          Value: !Ref Project
+        - Key: stage
+          Value: !Ref Stage
+        - Key: managed-by
+          Value: cloudformation
+
+  VirtualTechnicianTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub "${Project}-${Stage}-virtual-technician"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+        - AttributeName: tenantId
+          AttributeType: S
+        - AttributeName: equipmentId
+          AttributeType: S
+        - AttributeName: type
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: tenantId-index
+          KeySchema:
+            - AttributeName: tenantId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: equipmentId-index
+          KeySchema:
+            - AttributeName: equipmentId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: tenantId-type-index
+          KeySchema:
+            - AttributeName: tenantId
+              KeyType: HASH
+            - AttributeName: type
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: status-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: ATI
+          Value: ATI
+        - Key: project
+          Value: !Ref Project
+        - Key: stage
+          Value: !Ref Stage
+        - Key: managed-by
+          Value: cloudformation
+
+  PushSubscriptionsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub "${Project}-${Stage}-push-subscriptions"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      Tags:
+        - Key: ATI
+          Value: ATI
+        - Key: project
+          Value: !Ref Project
+        - Key: stage
+          Value: !Ref Stage
+        - Key: managed-by
+          Value: cloudformation
+
+Outputs:
+  OrganizationsTableName:
+    Value: !Ref OrganizationsTable
+    Export:
+      Name: !Sub "${Project}-organizations-table-${Stage}"
+
+  TenantsTableName:
+    Value: !Ref TenantsTable
+    Export:
+      Name: !Sub "${Project}-tenants-table-${Stage}"
+
+  TenantUsersTableName:
+    Value: !Ref TenantUsersTable
+    Export:
+      Name: !Sub "${Project}-tenant-users-table-${Stage}"
+
+  TenantEquipmentTableName:
+    Value: !Ref TenantEquipmentTable
+    Export:
+      Name: !Sub "${Project}-tenant-equipment-table-${Stage}"
+
+  OrganizationRolesTableName:
+    Value: !Ref OrganizationRolesTable
+    Export:
+      Name: !Sub "${Project}-organization-roles-table-${Stage}"
+
+  AuditLogTableName:
+    Value: !Ref AuditLogTable
+    Export:
+      Name: !Sub "${Project}-audit-log-table-${Stage}"
+
+  TenantEquipmentTelemetryTableName:
+    Value: !Ref TenantEquipmentTelemetryTable
+    Export:
+      Name: !Sub "${Project}-tenant-equipment-telemetry-table-${Stage}"
+
+  VirtualTechnicianTableName:
+    Value: !Ref VirtualTechnicianTable
+    Export:
+      Name: !Sub "${Project}-virtual-technician-table-${Stage}"
+
+  PushSubscriptionsTableName:
+    Value: !Ref PushSubscriptionsTable
+    Export:
+      Name: !Sub "${Project}-push-subscriptions-table-${Stage}"

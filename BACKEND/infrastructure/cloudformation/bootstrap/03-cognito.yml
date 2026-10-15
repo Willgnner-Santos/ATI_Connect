@@ -1,0 +1,117 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Plataforma ATI — Cognito User Pool SaaS
+  Template exclusivo para a base multi-tenant da ATI Connect.
+  Os clientId e clientSecret dos App Clients são gravados no DynamoDB
+  pelos scripts de inicializacao. Revisar docs/ops/known-limitations.md antes de usar.
+
+Parameters:
+  Project:
+    Type: String
+    Default: plataforma-ati
+  Stage:
+    Type: String
+    AllowedValues: [sandbox, staging, production, prod]
+
+Resources:
+
+  # ── SaaS Multi-tenant User Pool ─────────────────────────────────────────────
+  SaaSUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "${Project}-saas-${Stage}"
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      PasswordPolicy:
+        MinimumLength: 8
+        RequireUppercase: true
+        RequireLowercase: true
+        RequireNumbers: true
+        RequireSymbols: true
+        TemporaryPasswordValidityDays: 7
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+        - Name: name
+          AttributeDataType: String
+          Required: false
+          Mutable: true
+        - Name: organizationId
+          AttributeDataType: String
+          DeveloperOnlyAttribute: false
+          Mutable: true
+          Required: false
+        - Name: tenantId
+          AttributeDataType: String
+          DeveloperOnlyAttribute: false
+          Mutable: true
+          Required: false
+        - Name: organizationRole
+          AttributeDataType: String
+          DeveloperOnlyAttribute: false
+          Mutable: true
+          Required: false
+        - Name: tenantRole
+          AttributeDataType: String
+          DeveloperOnlyAttribute: false
+          Mutable: true
+          Required: false
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      Tags:
+        ATI: ATI
+        project: !Ref Project
+        stage: !Ref Stage
+        managed-by: cloudformation
+
+  SaaSUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub "${Project}-saas-client-${Stage}"
+      UserPoolId: !Ref SaaSUserPool
+      GenerateSecret: false  # Public client - frontend apps não podem manter secret seguro
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+      PreventUserExistenceErrors: ENABLED
+      ReadAttributes:
+        - email
+        - email_verified
+        - name
+        - custom:organizationId
+        - custom:tenantId
+        - custom:organizationRole
+        - custom:tenantRole
+      WriteAttributes:
+        - email
+        - name
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      RefreshTokenValidity: 30
+
+Outputs:
+  SaaSUserPoolId:
+    Value: !Ref SaaSUserPool
+    Export:
+      Name: !Sub "${Project}-saas-pool-id-${Stage}"
+
+  SaaSUserPoolArn:
+    Value: !GetAtt SaaSUserPool.Arn
+    Export:
+      Name: !Sub "${Project}-saas-pool-arn-${Stage}"
+
+  SaaSClientId:
+    Value: !Ref SaaSUserPoolClient
+    Export:
+      Name: !Sub "${Project}-saas-client-id-${Stage}"

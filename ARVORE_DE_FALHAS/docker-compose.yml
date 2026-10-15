@@ -1,0 +1,159 @@
+services:
+  api:
+    build: .
+    container_name: arvore_api
+    ports:
+      - "${INGEST_PUBLIC_PORT:-9081}:8000"
+    env_file:
+      - .env
+    environment:
+      POSTGRES_URI: postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-change-me-postgres}@postgres:5432/${POSTGRES_DB:-arvore_falhas}
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      AMQP_URL: amqp://${RABBITMQ_USER:-arvore_app}:${RABBITMQ_PASSWORD:-change-me-rabbitmq}@rabbitmq:5672/
+      S3_ENDPOINT_URL: http://rustfs:9000
+      S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-http://localhost:9000}
+      S3_USE_PATH_STYLE: "true"
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-rustfs-local}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-change-me-rustfs}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      rustfs-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  worker:
+    build: .
+    container_name: arvore_worker
+    command: ["python", "-m", "src.worker"]
+    env_file:
+      - .env
+    environment:
+      POSTGRES_URI: postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-change-me-postgres}@postgres:5432/${POSTGRES_DB:-arvore_falhas}
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      AMQP_URL: amqp://${RABBITMQ_USER:-arvore_app}:${RABBITMQ_PASSWORD:-change-me-rabbitmq}@rabbitmq:5672/
+      S3_ENDPOINT_URL: http://rustfs:9000
+      S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-http://localhost:9000}
+      S3_USE_PATH_STYLE: "true"
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-rustfs-local}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-change-me-rustfs}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      rustfs-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: arvore_postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-arvore_falhas}
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-arvore_falhas}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.19
+    container_name: arvore_qdrant
+    ports:
+      - "127.0.0.1:${QDRANT_PORT:-6333}:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/6333 && echo -e 'GET /healthz HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3 && head -1 <&3 | grep -q '200'"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    container_name: arvore_rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-arvore_app}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-change-me-rabbitmq}
+    ports:
+      - "127.0.0.1:${RABBITMQ_PORT:-5672}:5672"
+      - "127.0.0.1:${RABBITMQ_MGMT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  rustfs-permissions:
+    image: alpine:3.22
+    container_name: arvore_rustfs_permissions
+    user: root
+    command: ["sh", "-c", "chown -R 10001:10001 /data"]
+    volumes:
+      - rustfs_data:/data
+    restart: "no"
+
+  rustfs:
+    image: rustfs/rustfs:1.0.0
+    container_name: arvore_rustfs
+    depends_on:
+      rustfs-permissions:
+        condition: service_completed_successfully
+    environment:
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY:-rustfs-local}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_KEY:-change-me-rustfs}
+    ports:
+      - "${RUSTFS_BIND_HOST:-127.0.0.1}:${RUSTFS_PORT:-9000}:9000"
+      - "${RUSTFS_BIND_HOST:-127.0.0.1}:${RUSTFS_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - rustfs_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:9000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+    restart: unless-stopped
+
+  rustfs-init:
+    build: .
+    container_name: arvore_rustfs_init
+    command: ["python", "scripts/init_s3_bucket.py"]
+    env_file:
+      - .env
+    environment:
+      S3_ENDPOINT_URL: http://rustfs:9000
+      S3_USE_PATH_STYLE: "true"
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-rustfs-local}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-change-me-rustfs}
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  pgdata:
+  qdrant_data:
+  rabbitmq_data:
+  rustfs_data:

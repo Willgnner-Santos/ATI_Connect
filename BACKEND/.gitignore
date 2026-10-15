@@ -1,0 +1,61 @@
+# Python and local environments
+__pycache__/
+*.py[cod]
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+build/
+dist/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Tests and coverage
+.pytest_cache/
+.tox/
+.coverage*
+htmlcov/
+coverage.xml
+nosetests.xml
+*.cover
+.hypothesis/
+tests/*.log
+
+# SAM and deployment artifacts
+.aws-sam/
+.serverless/
+template.local.yaml
+01_layers/*.zip
+lambda_code.zip
+
+# Keep only authored source in the shared layer; install dependencies at build time.
+01_layers/plataforma_ati/python/*
+!01_layers/plataforma_ati/python/plataforma_ati.py
+!01_layers/plataforma_ati/python/notifications/
+
+# Credentials, local payloads and configuration
+.env
+.env.*
+!.env.example
+*.key
+*.p12
+*.pfx
+*service-account*.json
+*firebase-adminsdk*.json
+events.txt
+events_full.txt
+payload.json
+
+# Editors, OS and temporary files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.gemini/
+.cache/
+*.bak
+*.old
+*~
+*.tmp
+*.temp

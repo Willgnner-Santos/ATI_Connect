@@ -1,0 +1,1751 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Plataforma ATI - SaaS Multi-Tenant Backend
+
+# ============================================
+# Globals - Configurações compartilhadas
+# ============================================
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 256
+    Runtime: python3.14
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        REGION: !Ref AWS::Region
+        STAGE: !Ref Stage
+        DYNAMODB_TABLE: !Sub 'plataforma-ati-${Stage}'
+        DYNAMODB_TABLE_ORGANIZATIONS: !Sub 'plataforma-ati-${Stage}-organizations'
+        DYNAMODB_TABLE_TENANTS: !Sub 'plataforma-ati-${Stage}-tenants'
+        DYNAMODB_TABLE_USERS: !Sub 'plataforma-ati-${Stage}-tenant-users'
+        DYNAMODB_TABLE_EQUIPMENT: !Sub 'plataforma-ati-${Stage}-tenant-equipment'
+        DYNAMODB_TABLE_ROLES: !Sub 'plataforma-ati-${Stage}-organization-roles'
+        DYNAMODB_TABLE_AUDIT: !Sub 'plataforma-ati-${Stage}-audit-log'
+        CORS_ALLOW_ORIGIN: !Ref CorsAllowOrigin
+    Layers:
+      - !Ref LayerArn
+
+# ============================================
+# Parameters
+# ============================================
+Parameters:
+  Stage:
+    Type: String
+    Default: sandbox
+    AllowedValues:
+      - sandbox
+      - staging
+      - production
+    Description: Deployment stage
+
+  Project:
+    Type: String
+    Default: plataforma-ati
+    Description: Project name
+
+  CorsAllowOrigin:
+    Type: String
+    Default: "*"
+    Description: Origem permitida pelo CORS; informar o domínio do frontend fora do sandbox.
+
+  LayerArn:
+    Type: String
+    Description: ARN da Lambda Layer plataforma_ati (incluindo versão). Passar explicitamente no deploy.
+
+  TelegramBotToken:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Telegram Bot Token para envio de mensagens
+
+  FirebaseServiceAccountSsmParam:
+    Type: String
+    Default: ""
+    Description: Caminho do parâmetro SSM (SecureString) com o JSON da service account do Firebase
+
+
+# ============================================
+# Resources
+# ============================================
+Resources:
+
+  # ==========================================
+  # Lambda Layer (Imported from existing stack)
+  # ==========================================
+  # PlataformaAtiLayer is imported via !ImportValue from plataforma-ati-layer-sandbox stack
+
+  # ==========================================
+  # Authentication Functions
+  # ==========================================
+  AuthLoginFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-auth-login-${Stage}'
+      CodeUri: 02_lambdas/saas/auth/login/
+      Handler: handler.handler
+      Description: SaaS Login - Authenticate user
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenants'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organizations'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:InitiateAuth
+                - cognito-idp:GetUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/auth/login
+            Method: POST
+            RestApiId: !Ref ApiGateway
+
+  AuthRefreshFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-auth-refresh-${Stage}'
+      CodeUri: 02_lambdas/saas/auth/refresh/
+      Handler: handler.handler
+      Description: SaaS Refresh Token
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenants'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:InitiateAuth
+                - cognito-idp:AdminInitiateAuth
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/auth/refresh
+            Method: POST
+            RestApiId: !Ref ApiGateway
+
+  AuthLogoutFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-auth-logout-${Stage}'
+      CodeUri: 02_lambdas/saas/auth/logout/
+      Handler: handler.handler
+      Description: SaaS Logout - Invalidate token
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GlobalSignOut
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/auth/logout
+            Method: POST
+            RestApiId: !Ref ApiGateway
+
+  AuthForgotPasswordFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-auth-forgot-password-${Stage}'
+      CodeUri: 02_lambdas/saas/auth/forgot-password/
+      Handler: handler.handler
+      Description: SaaS Forgot Password - Request reset code
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenants'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:ForgotPassword
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/auth/forgot-password
+            Method: POST
+            RestApiId: !Ref ApiGateway
+
+  AuthResetPasswordFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-auth-reset-password-${Stage}'
+      CodeUri: 02_lambdas/saas/auth/reset-password/
+      Handler: handler.handler
+      Description: SaaS Reset Password - Confirm new password
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenants'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:ConfirmForgotPassword
+                - cognito-idp:AdminUserGlobalSignOut
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/auth/reset-password
+            Method: POST
+            RestApiId: !Ref ApiGateway
+
+  # ==========================================
+  # Organization Functions
+  # ==========================================
+  OrganizationGetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-organization-get-${Stage}'
+      CodeUri: 02_lambdas/saas/organization/get/
+      Handler: handler.handler
+      Description: List organizations
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organizations'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/organization
+            Method: GET
+            RestApiId: !Ref ApiGateway
+
+  OrganizationNewFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-organization-new-${Stage}'
+      CodeUri: 02_lambdas/saas/organization/new/
+      Handler: handler.handler
+      Description: Create new organization
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-organizations'
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-users'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenants'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+                - cognito-idp:AdminCreateUser
+                - cognito-idp:AdminSetUserPassword
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/organization
+            Method: POST
+            RestApiId: !Ref ApiGateway
+
+  OrganizationDeleteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-organization-delete-${Stage}'
+      CodeUri: 02_lambdas/saas/organization/delete/
+      Handler: handler.handler
+      Description: Soft delete organization
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-organizations'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-users'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+                - cognito-idp:AdminGetUser
+                - cognito-idp:AdminDisableUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/organization/{id}
+            Method: DELETE
+            RestApiId: !Ref ApiGateway
+
+  OrganizationReactivateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-organization-reactivate-${Stage}'
+      CodeUri: 02_lambdas/saas/organization/reactivate/
+      Handler: handler.handler
+      Description: Reactivate organization
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-organizations'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-users'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+                - cognito-idp:AdminGetUser
+                - cognito-idp:AdminEnableUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/organization/{id}/reactivate
+            Method: POST
+            RestApiId: !Ref ApiGateway
+
+  # ==========================================
+  # Tenant Functions
+  # ==========================================
+  TenantGetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-tenant-get-${Stage}'
+      CodeUri: 02_lambdas/saas/tenant/get/
+      Handler: handler.handler
+      Description: List tenants
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenants'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/tenant
+            Method: GET
+            RestApiId: !Ref ApiGateway
+
+  TenantNewFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-tenant-new-${Stage}'
+      CodeUri: 02_lambdas/saas/tenant/new/
+      Handler: handler.handler
+      Description: Create new tenant
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenants'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organizations'
+
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-users'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+                - cognito-idp:AdminCreateUser
+                - cognito-idp:AdminSetUserPassword
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/tenant
+            Method: POST
+            RestApiId: !Ref ApiGateway
+
+  TenantDeleteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-tenant-delete-${Stage}'
+      CodeUri: 02_lambdas/saas/tenant/delete/
+      Handler: handler.handler
+      Description: Soft delete tenant
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenants'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-users'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+                - cognito-idp:AdminGetUser
+                - cognito-idp:AdminDisableUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/tenant/{id}
+            Method: DELETE
+            RestApiId: !Ref ApiGateway
+
+  TenantReactivateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-tenant-reactivate-${Stage}'
+      CodeUri: 02_lambdas/saas/tenant/reactivate/
+      Handler: handler.handler
+      Description: Reactivate tenant
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenants'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-users'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+                - cognito-idp:AdminGetUser
+                - cognito-idp:AdminEnableUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/tenant/{id}/reactivate
+            Method: POST
+            RestApiId: !Ref ApiGateway
+
+  # ==========================================
+  # User Functions
+  # ==========================================
+  UserGetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-user-get-${Stage}'
+      CodeUri: 02_lambdas/saas/user/get/
+      Handler: handler.handler
+      Description: List users
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-users'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/user
+            Method: GET
+            RestApiId: !Ref ApiGateway
+
+  UserNewFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-user-new-${Stage}'
+      CodeUri: 02_lambdas/saas/user/new/
+      Handler: handler.handler
+      Description: Create new user
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-users'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenants'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+                - cognito-idp:AdminCreateUser
+                - cognito-idp:AdminSetUserPassword
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/user
+            Method: POST
+            RestApiId: !Ref ApiGateway
+
+  UserUpdateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-user-update-${Stage}'
+      CodeUri: 02_lambdas/saas/user/update/
+      Handler: handler.handler
+      Description: Update user
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-users'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenants'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+                - cognito-idp:AdminGetUser
+                - cognito-idp:AdminUpdateUserAttributes
+                - cognito-idp:AdminSetUserPassword
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/user/{id}
+            Method: PUT
+            RestApiId: !Ref ApiGateway
+
+  UserDeleteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-user-delete-${Stage}'
+      CodeUri: 02_lambdas/saas/user/delete/
+      Handler: handler.handler
+      Description: Delete user
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-users'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenants'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+                - cognito-idp:AdminGetUser
+                - cognito-idp:AdminDisableUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/user/{id}
+            Method: DELETE
+            RestApiId: !Ref ApiGateway
+
+  UserReactivateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-user-reactivate-${Stage}'
+      CodeUri: 02_lambdas/saas/user/reactivate/
+      Handler: handler.handler
+      Description: Reactivate user
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-users'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenants'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+                - cognito-idp:AdminGetUser
+                - cognito-idp:AdminEnableUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/user/{id}/reactivate
+            Method: POST
+            RestApiId: !Ref ApiGateway
+
+  # ==========================================
+  # Equipment Functions
+  # ==========================================
+  EquipmentGetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-equipment-get-${Stage}'
+      CodeUri: 02_lambdas/saas/equipment/get/
+      Handler: handler.handler
+      Description: List equipment
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-equipment'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/equipment
+            Method: GET
+            RestApiId: !Ref ApiGateway
+
+  EquipmentNewFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-equipment-new-${Stage}'
+      CodeUri: 02_lambdas/saas/equipment/new/
+      Handler: handler.handler
+      Description: Create new equipment
+      Environment:
+        Variables:
+          IOT_POLICY: !Ref DeviceIoTPolicy
+          FAULT_TREE_SERVICE_URL: ''
+          FAULT_TREE_INTERNAL_KEY: ''
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-equipment'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organizations'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenants'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - iot:CreateThing
+                - iot:CreateKeysAndCertificate
+                - iot:AttachThingPrincipal
+                - iot:AttachPolicy
+                - iot:DescribeEndpoint
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/equipment
+            Method: POST
+            RestApiId: !Ref ApiGateway
+
+  EquipmentViewFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-equipment-view-${Stage}'
+      CodeUri: 02_lambdas/saas/equipment/view/
+      Handler: handler.handler
+      Description: View equipment details
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-equipment'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/equipment/{id}
+            Method: GET
+            RestApiId: !Ref ApiGateway
+
+  EquipmentUpdateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-equipment-update-${Stage}'
+      CodeUri: 02_lambdas/saas/equipment/update/
+      Handler: handler.handler
+      Description: Update equipment
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-equipment'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organizations'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/equipment/{id}
+            Method: PUT
+            RestApiId: !Ref ApiGateway
+
+  EquipmentDeleteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-equipment-delete-${Stage}'
+      CodeUri: 02_lambdas/saas/equipment/delete/
+      Handler: handler.handler
+      Description: Delete equipment
+      Environment:
+        Variables:
+          FAULT_TREE_SERVICE_URL: ''
+          FAULT_TREE_INTERNAL_KEY: ''
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-equipment'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - iot:DeleteThing
+                - iot:ListThingPrincipals
+                - iot:DetachThingPrincipal
+                - iot:ListAttachedPolicies
+                - iot:DetachPolicy
+                - iot:UpdateCertificate
+                - iot:DeleteCertificate
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/equipment/{id}
+            Method: DELETE
+            RestApiId: !Ref ApiGateway
+
+  # ==========================================
+  # Equipment Action Functions (comandos)
+  # ==========================================
+  EquipmentActionGetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-equipment-action-get-${Stage}'
+      CodeUri: 02_lambdas/saas/equipment/action/get/
+      Handler: handler.handler
+      Description: List equipment actions allowed for the caller role
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-equipment'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/equipment/{id}/action
+            Method: GET
+            RestApiId: !Ref ApiGateway
+
+  EquipmentActionSendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-equipment-action-send-${Stage}'
+      CodeUri: 02_lambdas/saas/equipment/action/send/
+      Handler: handler.handler
+      Description: Send a registered action (command) to the equipment via IoT Core
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-equipment'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+            # Publicação restrita aos tópicos de telemetria dos devices, que é onde o
+            # contrato de comando ({type:'send'}) trafega
+            - Effect: Allow
+              Action:
+                - iot:Publish
+              Resource: !Sub 'arn:aws:iot:${AWS::Region}:${AWS::AccountId}:topic/telemetry/*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/equipment/{id}/action
+            Method: POST
+            RestApiId: !Ref ApiGateway
+
+  # ==========================================
+  # IoT Telemetry Ingestion
+  # ==========================================
+  # Policy anexada ao certificado de cada device (equipment/new). Escopada por
+  # iot:Connection.Thing.ThingName para permitir Connect/Publish/Receive/Subscribe
+  # apenas no próprio tópico telemetry/{thingId} — Receive/Subscribe são
+  # necessários para o device receber os comandos "send" do Virtual Technician,
+  # publicados no mesmo tópico. Nome distinto da policy antiga (não gerenciada
+  # por IaC, criada manualmente) para não colidir nem afetar certificados já
+  # emitidos.
+  DeviceIoTPolicy:
+    Type: AWS::IoT::Policy
+    Properties:
+      PolicyName: !Sub 'plataforma-ati-iot-device-policy-${Stage}'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: iot:Connect
+            Resource: !Sub 'arn:aws:iot:${AWS::Region}:${AWS::AccountId}:client/${!iot:Connection.Thing.ThingName}'
+          - Effect: Allow
+            Action:
+              - iot:Publish
+              - iot:Receive
+            Resource: !Sub 'arn:aws:iot:${AWS::Region}:${AWS::AccountId}:topic/telemetry/${!iot:Connection.Thing.ThingName}'
+          - Effect: Allow
+            Action: iot:Subscribe
+            Resource: !Sub 'arn:aws:iot:${AWS::Region}:${AWS::AccountId}:topicfilter/telemetry/${!iot:Connection.Thing.ThingName}'
+
+  TelemetryRouterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-telemetry-router-${Stage}'
+      CodeUri: 02_lambdas/saas/telemetry/router/
+      Handler: handler.handler
+      Description: Roteia telemetria MQTT do IoT Core para a tabela de telemetria
+      Timeout: 15
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_TELEMETRY: !Sub 'plataforma-ati-${Stage}-tenant-equipment-telemetry'
+          DEADBAND_PCT: "0.05"
+          HEARTBEAT_SECONDS: "300"
+          MIN_INTERVAL_SECONDS: "2"
+      Policies:
+        # Crud (não só Read) porque o Router atualiza lastSeen/lastValues/lastTelemetryAt
+        # no próprio item do equipamento.
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-equipment'
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-equipment-telemetry'
+      # Sem Events: — esta função é invocada pela AWS::IoT::TopicRule abaixo,
+      # não por uma fonte de evento gerenciada pelo SAM, então a permissão de
+      # invoke precisa ser declarada explicitamente (TelemetryRouterLambdaPermission).
+
+  TelemetryRouterErrorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/iot/${Project}-telemetry-router-errors-${Stage}'
+      RetentionInDays: 30
+
+  IoTRuleErrorLoggingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${Project}-iot-rule-error-logging-role-${Stage}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: iot.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WriteErrorLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt TelemetryRouterErrorLogGroup.Arn
+
+  TelemetryRouterTopicRule:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      RuleName: !Sub 'plataforma_ati_saas_telemetry_router_${Stage}'
+      TopicRulePayload:
+        Sql: "SELECT topic(2) as thingId, timestamp() as ruleTimestamp, * FROM 'telemetry/+'"
+        AwsIotSqlVersion: '2016-03-23'
+        RuleDisabled: false
+        Actions:
+          - Lambda:
+              FunctionArn: !GetAtt TelemetryRouterFunction.Arn
+        ErrorAction:
+          CloudwatchLogs:
+            LogGroupName: !Ref TelemetryRouterErrorLogGroup
+            RoleArn: !GetAtt IoTRuleErrorLoggingRole.Arn
+
+  TelemetryRouterLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref TelemetryRouterFunction
+      Principal: iot.amazonaws.com
+      SourceArn: !GetAtt TelemetryRouterTopicRule.Arn
+      SourceAccount: !Ref AWS::AccountId
+
+  # ==========================================
+  # IAM Roles assumidas por outros serviços AWS (IoT Rules Engine, EventBridge
+  # Scheduler) — consolidadas do antigo template IoT separado,
+  # que nunca foi deployado por nenhum fluxo rastreado (nem deploy-full.ps1, nem
+  # o Makefile). Antes desta migração essas roles só existiam na AWS (se
+  # existissem) via algum deploy manual não rastreado do arquivo legado.
+  # ==========================================
+  IoTRuleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${Project}-iot-router-role-${Stage}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: iot.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        # Uso real (virtual-technician/create|update via IOT_RULE_ROLE_ARN): role
+        # assumida pela IoT Rule dinâmica de cada action/notification para
+        # publicar na fila SQS correspondente (ação "sqs" da TopicRule) —
+        # precisa de sqs:SendMessage, não lambda:InvokeFunction (era isso que a
+        # definição legada continha, incorretamente, para um Router Lambda que
+        # nunca chegou a existir).
+        - PolicyName: SendToVirtualTechnicianQueues
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: sqs:SendMessage
+                Resource:
+                  - !GetAtt VirtualTechnicianActionQueue.Arn
+                  - !GetAtt VirtualTechnicianNotificationQueue.Arn
+
+  IoTAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${Project}-iot-access-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: IoTMQTTAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iot:Connect
+                  - iot:Subscribe
+                  - iot:Receive
+                  - iot:Publish
+                  - iot:DescribeEndpoint
+                Resource: '*'
+
+  EventBridgeSchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${Project}-eventbridge-role-${Stage}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeVirtualTechnicianExecutor
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${Project}-saas-virtual-technician-executor-${Stage}'
+
+  # ==========================================
+  # Catalog Sensor Type Functions
+  # ==========================================
+  CatalogSensorTypeGetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-catalog-sensor-type-get-${Stage}'
+      CodeUri: 02_lambdas/saas/catalog/sensor-type/get/
+      Handler: handler.handler
+      Description: List sensor types from global catalog
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organizations'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/catalog/sensor-type
+            Method: GET
+            RestApiId: !Ref ApiGateway
+
+  CatalogSensorTypeNewFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-catalog-sensor-type-new-${Stage}'
+      CodeUri: 02_lambdas/saas/catalog/sensor-type/new/
+      Handler: handler.handler
+      Description: Create new sensor type in global catalog
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-organizations'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/catalog/sensor-type
+            Method: POST
+            RestApiId: !Ref ApiGateway
+
+  CatalogSensorTypeDeleteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-catalog-sensor-type-delete-${Stage}'
+      CodeUri: 02_lambdas/saas/catalog/sensor-type/delete/
+      Handler: handler.handler
+      Description: Delete sensor type from global catalog
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-organizations'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/catalog/sensor-type/{id}
+            Method: DELETE
+            RestApiId: !Ref ApiGateway
+
+  # ==========================================
+  # ==========================================
+  # Catalog Equipment Model Functions
+  # ==========================================
+  CatalogEquipmentModelGetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-catalog-equipment-model-get-${Stage}'
+      CodeUri: 02_lambdas/saas/catalog/equipment-model/get/
+      Handler: handler.handler
+      Description: List equipment models from organization catalog
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organizations'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/catalog/equipment-model
+            Method: GET
+            RestApiId: !Ref ApiGateway
+
+  CatalogEquipmentModelNewFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-catalog-equipment-model-new-${Stage}'
+      CodeUri: 02_lambdas/saas/catalog/equipment-model/new/
+      Handler: handler.handler
+      Description: Create new equipment model in organization catalog
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-organizations'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/catalog/equipment-model
+            Method: POST
+            RestApiId: !Ref ApiGateway
+
+  CatalogEquipmentModelDeleteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-catalog-equipment-model-delete-${Stage}'
+      CodeUri: 02_lambdas/saas/catalog/equipment-model/delete/
+      Handler: handler.handler
+      Description: Delete equipment model from organization catalog
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-organizations'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/catalog/equipment-model/{id}
+            Method: DELETE
+            RestApiId: !Ref ApiGateway
+
+  CatalogEquipmentModelUpdateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-catalog-equipment-model-update-${Stage}'
+      CodeUri: 02_lambdas/saas/catalog/equipment-model/update/
+      Handler: handler.handler
+      Description: Update equipment model from organization catalog
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-organizations'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/catalog/equipment-model/{id}
+            Method: PUT
+            RestApiId: !Ref ApiGateway
+
+  # ==========================================
+  # Dashboard Functions
+  # ==========================================
+  DashboardGetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-dashboard-get-${Stage}'
+      CodeUri: 02_lambdas/saas/dashboard/get/
+      Handler: handler.handler
+      Description: Get dashboard data with equipment telemetry
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_TELEMETRY: !Sub 'plataforma-ati-${Stage}-tenant-equipment-telemetry'
+          IOT_ASSUME_ROLE: !Sub 'arn:aws:iam::${AWS::AccountId}:role/plataforma-ati-iot-access-role'
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-equipment'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-equipment-telemetry'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - sts:AssumeRole
+              Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/plataforma-ati-iot-access-role'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/dashboard
+            Method: GET
+            RestApiId: !Ref ApiGateway
+
+  # ==========================================
+  # Virtual Technician Functions
+  # ==========================================
+  VirtualTechnicianListFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-virtual-technician-list-${Stage}'
+      CodeUri: 02_lambdas/saas/virtual-technician/list/
+      Handler: handler.handler
+      Description: List virtual technician actions
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_VIRTUAL_TECHNICIAN: !Sub 'plataforma-ati-${Stage}-virtual-technician'
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-virtual-technician'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/virtual-technician
+            Method: GET
+            RestApiId: !Ref ApiGateway
+
+  VirtualTechnicianCreateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-virtual-technician-create-${Stage}'
+      CodeUri: 02_lambdas/saas/virtual-technician/create/
+      Handler: handler.handler
+      Description: Create virtual technician action
+      Timeout: 60
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_VIRTUAL_TECHNICIAN: !Sub 'plataforma-ati-${Stage}-virtual-technician'
+          ACTION_QUEUE_URL: !Ref VirtualTechnicianActionQueue
+          ACTION_QUEUE_ARN: !GetAtt VirtualTechnicianActionQueue.Arn
+          NOTIFICATION_QUEUE_URL: !Ref VirtualTechnicianNotificationQueue
+          NOTIFICATION_QUEUE_ARN: !GetAtt VirtualTechnicianNotificationQueue.Arn
+          IOT_RULE_ROLE_ARN: !Sub 'arn:aws:iam::${AWS::AccountId}:role/plataforma-ati-iot-router-role-${Stage}'
+          EVENTBRIDGE_ROLE_ARN: !Sub 'arn:aws:iam::${AWS::AccountId}:role/plataforma-ati-eventbridge-role-${Stage}'
+          SCHEDULE_EXECUTOR_LAMBDA_ARN: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${Project}-saas-virtual-technician-executor-${Stage}'
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-virtual-technician'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-equipment'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - iot:CreateTopicRule
+                - iot:DeleteTopicRule
+                - iot:GetTopicRule
+              Resource: '*'
+            - Effect: Allow
+              Action: iam:PassRole
+              Resource:
+                - !Sub 'arn:aws:iam::${AWS::AccountId}:role/plataforma-ati-iot-router-role-${Stage}'
+                - !Sub 'arn:aws:iam::${AWS::AccountId}:role/plataforma-ati-eventbridge-role-${Stage}'
+            - Effect: Allow
+              Action:
+                - scheduler:CreateSchedule
+                - scheduler:DeleteSchedule
+                - scheduler:GetSchedule
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - sqs:GetQueueUrl
+                - sqs:GetQueueAttributes
+              Resource:
+                - !GetAtt VirtualTechnicianActionQueue.Arn
+                - !GetAtt VirtualTechnicianNotificationQueue.Arn
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/virtual-technician
+            Method: POST
+            RestApiId: !Ref ApiGateway
+
+  VirtualTechnicianViewFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-virtual-technician-view-${Stage}'
+      CodeUri: 02_lambdas/saas/virtual-technician/view/
+      Handler: handler.handler
+      Description: View virtual technician action details
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_VIRTUAL_TECHNICIAN: !Sub 'plataforma-ati-${Stage}-virtual-technician'
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-virtual-technician'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/virtual-technician/{id}
+            Method: GET
+            RestApiId: !Ref ApiGateway
+
+  VirtualTechnicianUpdateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-virtual-technician-update-${Stage}'
+      CodeUri: 02_lambdas/saas/virtual-technician/update/
+      Handler: handler.handler
+      Description: Update virtual technician action
+      Timeout: 60
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_VIRTUAL_TECHNICIAN: !Sub 'plataforma-ati-${Stage}-virtual-technician'
+          ACTION_QUEUE_URL: !Ref VirtualTechnicianActionQueue
+          NOTIFICATION_QUEUE_URL: !Ref VirtualTechnicianNotificationQueue
+          IOT_RULE_ROLE_ARN: !Sub 'arn:aws:iam::${AWS::AccountId}:role/plataforma-ati-iot-router-role-${Stage}'
+          EVENTBRIDGE_ROLE_ARN: !Sub 'arn:aws:iam::${AWS::AccountId}:role/plataforma-ati-eventbridge-role-${Stage}'
+          SCHEDULE_EXECUTOR_LAMBDA_ARN: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${Project}-saas-virtual-technician-executor-${Stage}'
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-virtual-technician'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-equipment'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - iot:CreateTopicRule
+                - iot:DeleteTopicRule
+                - iot:GetTopicRule
+              Resource: '*'
+            - Effect: Allow
+              Action: iam:PassRole
+              Resource:
+                - !Sub 'arn:aws:iam::${AWS::AccountId}:role/plataforma-ati-iot-router-role-${Stage}'
+                - !Sub 'arn:aws:iam::${AWS::AccountId}:role/plataforma-ati-eventbridge-role-${Stage}'
+            - Effect: Allow
+              Action:
+                - scheduler:CreateSchedule
+                - scheduler:DeleteSchedule
+                - scheduler:GetSchedule
+                - scheduler:UpdateSchedule
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - sqs:GetQueueUrl
+                - sqs:GetQueueAttributes
+              Resource:
+                - !GetAtt VirtualTechnicianActionQueue.Arn
+                - !GetAtt VirtualTechnicianNotificationQueue.Arn
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/virtual-technician/{id}
+            Method: PUT
+            RestApiId: !Ref ApiGateway
+
+  VirtualTechnicianDeleteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-virtual-technician-delete-${Stage}'
+      CodeUri: 02_lambdas/saas/virtual-technician/delete/
+      Handler: handler.handler
+      Description: Delete virtual technician action
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_VIRTUAL_TECHNICIAN: !Sub 'plataforma-ati-${Stage}-virtual-technician'
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-virtual-technician'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - iot:DeleteTopicRule
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - scheduler:DeleteSchedule
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/virtual-technician/{id}
+            Method: DELETE
+            RestApiId: !Ref ApiGateway
+
+  # ==========================================
+  # Report Functions
+  # ==========================================
+  ReportGetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-report-get-${Stage}'
+      CodeUri: 02_lambdas/saas/report/get/
+      Handler: handler.handler
+      Description: Generate equipment telemetry report for time range
+      Timeout: 60
+      MemorySize: 512
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_TELEMETRY: !Sub 'plataforma-ati-${Stage}-tenant-equipment-telemetry'
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-equipment'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-equipment-telemetry'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-organization-roles'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/report
+            Method: GET
+            RestApiId: !Ref ApiGateway
+
+  # ==========================================
+  # Push Subscriptions Functions
+  # ==========================================
+
+  PushSubscriptionRegisterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-push-subscription-register-${Stage}'
+      CodeUri: 02_lambdas/saas/push-subscriptions/register/
+      Handler: handler.handler
+      Description: Register a mobile push notification subscription
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_PUSH_SUBSCRIPTIONS: !Sub '${Project}-${Stage}-push-subscriptions'
+          FIREBASE_SERVICE_ACCOUNT_SSM_PARAM: !Ref FirebaseServiceAccountSsmParam
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-push-subscriptions'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${FirebaseServiceAccountSsmParam}'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/push-subscriptions
+            Method: POST
+            RestApiId: !Ref ApiGateway
+
+  PushSubscriptionDeleteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-push-subscription-delete-${Stage}'
+      CodeUri: 02_lambdas/saas/push-subscriptions/delete/
+      Handler: handler.handler
+      Description: Remove a mobile push notification subscription
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_PUSH_SUBSCRIPTIONS: !Sub '${Project}-${Stage}-push-subscriptions'
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-push-subscriptions'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /saas/push-subscriptions/{id}
+            Method: DELETE
+            RestApiId: !Ref ApiGateway
+
+  # ==========================================
+  # SQS Dead-Letter Queues for Virtual Technician
+  # ==========================================
+  VirtualTechnicianActionDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${Project}-virtual-technician-action-dlq-${Stage}'
+      MessageRetentionPeriod: 1209600
+
+  VirtualTechnicianNotificationDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${Project}-virtual-technician-notification-dlq-${Stage}'
+      MessageRetentionPeriod: 1209600
+
+  VirtualTechnicianExecutorDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${Project}-virtual-technician-executor-dlq-${Stage}'
+      MessageRetentionPeriod: 1209600
+
+  VirtualTechnicianNotifierDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${Project}-virtual-technician-notifier-dlq-${Stage}'
+      MessageRetentionPeriod: 1209600
+
+  # ==========================================
+  # SQS Queues for Virtual Technician
+  # ==========================================
+  VirtualTechnicianActionQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${Project}-virtual-technician-action-${Stage}'
+      VisibilityTimeout: 300
+      MessageRetentionPeriod: 1209600
+      ReceiveMessageWaitTimeSeconds: 20
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt VirtualTechnicianActionDLQ.Arn
+        maxReceiveCount: 3
+      Tags:
+        - Key: project
+          Value: !Ref Project
+        - Key: stage
+          Value: !Ref Stage
+
+  VirtualTechnicianNotificationQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${Project}-virtual-technician-notification-${Stage}'
+      VisibilityTimeout: 300
+      MessageRetentionPeriod: 1209600
+      ReceiveMessageWaitTimeSeconds: 20
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt VirtualTechnicianNotificationDLQ.Arn
+        maxReceiveCount: 3
+      Tags:
+        - Key: project
+          Value: !Ref Project
+        - Key: stage
+          Value: !Ref Stage
+
+  VirtualTechnicianExecutorQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${Project}-virtual-technician-executor-${Stage}'
+      VisibilityTimeout: 300
+      MessageRetentionPeriod: 1209600
+      ReceiveMessageWaitTimeSeconds: 20
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt VirtualTechnicianExecutorDLQ.Arn
+        maxReceiveCount: 3
+      Tags:
+        - Key: project
+          Value: !Ref Project
+        - Key: stage
+          Value: !Ref Stage
+
+  VirtualTechnicianNotifierQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${Project}-virtual-technician-notifier-${Stage}'
+      VisibilityTimeout: 300
+      MessageRetentionPeriod: 1209600
+      ReceiveMessageWaitTimeSeconds: 20
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt VirtualTechnicianNotifierDLQ.Arn
+        maxReceiveCount: 3
+      Tags:
+        - Key: project
+          Value: !Ref Project
+        - Key: stage
+          Value: !Ref Stage
+
+  # ==========================================
+  # Virtual Technician Processing Lambdas
+  # ==========================================
+  VirtualTechnicianValidatorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-virtual-technician-validator-${Stage}'
+      CodeUri: 02_lambdas/saas/virtual-technician/validator/
+      Handler: handler.handler
+      Description: Validate conditions before executing actions
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_VIRTUAL_TECHNICIAN: !Sub 'plataforma-ati-${Stage}-virtual-technician'
+          EXECUTOR_QUEUE_URL: !Ref VirtualTechnicianExecutorQueue
+          NOTIFIER_QUEUE_URL: !Ref VirtualTechnicianNotifierQueue
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-virtual-technician'
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt VirtualTechnicianExecutorQueue.QueueName
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt VirtualTechnicianNotifierQueue.QueueName
+      Events:
+        ActionQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt VirtualTechnicianActionQueue.Arn
+            BatchSize: 10
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+        NotificationQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt VirtualTechnicianNotificationQueue.Arn
+            BatchSize: 10
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+
+  VirtualTechnicianExecutorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-virtual-technician-executor-${Stage}'
+      CodeUri: 02_lambdas/saas/virtual-technician/executor/
+      Handler: handler.handler
+      Description: Execute MQTT actions
+      Timeout: 60
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_EQUIPMENT: !Sub 'plataforma-ati-${Stage}-tenant-equipment'
+          DYNAMODB_TABLE_VIRTUAL_TECHNICIAN: !Sub 'plataforma-ati-${Stage}-virtual-technician'
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-tenant-equipment'
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-virtual-technician'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - iot:Publish
+              Resource: '*'
+      Events:
+        QueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt VirtualTechnicianExecutorQueue.Arn
+            BatchSize: 5
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+
+  VirtualTechnicianNotifierFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Project}-saas-virtual-technician-notifier-${Stage}'
+      CodeUri: 02_lambdas/saas/virtual-technician/notifier/
+      Handler: handler.handler
+      Description: Send email and SMS notifications
+      Timeout: 30
+      Environment:
+        Variables:
+          SENDER_EMAIL: noreply@plataforma-ati.com
+          TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
+          DYNAMODB_TABLE_VIRTUAL_TECHNICIAN: !Sub 'plataforma-ati-${Stage}-virtual-technician'
+          DYNAMODB_TABLE_PUSH_SUBSCRIPTIONS: !Sub '${Project}-${Stage}-push-subscriptions'
+          FIREBASE_SERVICE_ACCOUNT_SSM_PARAM: !Ref FirebaseServiceAccountSsmParam
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub '${Project}-${Stage}-virtual-technician'
+        - DynamoDBReadPolicy:
+            TableName: !Sub '${Project}-${Stage}-push-subscriptions'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${FirebaseServiceAccountSsmParam}'
+      Events:
+        QueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt VirtualTechnicianNotifierQueue.Arn
+            BatchSize: 10
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+
+  # ==========================================
+  # API Gateway
+  # ==========================================
+  ApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub '${Project}-saas-api-${Stage}'
+      StageName: !Ref Stage
+      Cors:
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: !Sub "'${CorsAllowOrigin}'"
+      Auth:
+        ApiKeyRequired: false
+
+# ============================================
+# Outputs
+# ============================================
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Stage}'
+    Export:
+      Name: !Sub '${Project}-saas-api-endpoint-${Stage}'
+
+  ApiGatewayId:
+    Description: API Gateway ID
+    Value: !Ref ApiGateway
+    Export:
+      Name: !Sub '${Project}-saas-api-id-${Stage}'
+
+  LayerArn:
+    Description: Lambda Layer ARN usada neste deploy
+    Value: !Ref LayerArn

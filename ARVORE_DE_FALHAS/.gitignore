@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# Segredos e ambientes locais
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+
+# Testes e ferramentas
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.hypothesis/
+
+# Artefatos e dados locais
+*.log
+*.pid
+*.tmp
+tmp/
+logs/
+volumes/
+docker-data/
+manuais/
+*.pdf
+*.docx
+*.xlsx
+
+# Contrato OpenAPI e arquivos gerados localmente
+docs/openapi.json
+
+# Editores e sistema operacional
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
